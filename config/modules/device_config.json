@@ -1,0 +1,12 @@
+{
+  "device": {
+    "led": {
+      "default_brightness": 100,
+      "max_brightness": 100,
+      "min_brightness": 0
+    },
+    "supported_devices": [
+      "led"
+    ]
+  }
+}

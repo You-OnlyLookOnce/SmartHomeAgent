@@ -1,0 +1,8 @@
+{
+  "qiniu": {
+    "access_key": "你的七牛云AccessKey",
+    "secret_key": "你的七牛云SecretKey",
+    "bucket_name": "你的存储空间名称",
+    "domain": "你的域名"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "test_user": {
+    "username": "test_user",
+    "password_hash": "3c69b73f7eb163074fb604d6488c3bc53070cc437e971cc55559a91095ee022a",
+    "salt": "038b6c410182cf32d9518b64ad640fbc",
+    "role": "user",
+    "created_at": "2026-03-16T12:55:33.196754",
+    "last_login": "2026-03-16T12:55:33.214105"
+  }
+}

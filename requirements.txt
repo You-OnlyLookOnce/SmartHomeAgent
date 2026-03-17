@@ -1,0 +1,26 @@
+# 项目依赖项
+
+# Web框架
+fastapi==0.135.1
+uvicorn==0.41.0
+
+# 数据库
+# sqlite3是Python标准库，无需单独安装
+
+# 安全
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
+
+# 工具
+python-multipart==0.0.6
+requests==2.31.0
+
+# 开发
+black==24.10.0
+flake8==7.1.0
+pytest==8.3.3
+
+# 其他
+numpy==1.26.4
+pandas==2.2.2

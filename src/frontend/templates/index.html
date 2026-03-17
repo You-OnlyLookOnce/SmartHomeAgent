@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小酷 - 智能家居助手</title>
+    <link rel="stylesheet" href="../static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 顶部晨光栏 -->
+        <header class="sunrise-header">
+            <div class="sunrise-glow"></div>
+            <h1 class="app-title">🌤️ 小酷</h1>
+            <p class="app-subtitle">你的智能家居伙伴</p>
+        </header>
+        
+        <!-- 对话区域 -->
+        <main class="chat-area" id="chat-area">
+            <div class="message received">
+                <div class="avatar">🌟</div>
+                <div class="bubble">你好呀！有什么我可以帮你的吗？</div>
+            </div>
+        </main>
+        
+        <!-- 输入区域 -->
+        <footer class="input-area">
+            <input type="text" id="message-input" placeholder="跟小酷说点什么..." />
+            <button class="send-btn" id="send-btn">发送</button>
+        </footer>
+        
+        <!-- 设备控制面板 -->
+        <div class="device-panel" id="device-panel">
+            <h2>设备控制</h2>
+            <div class="device-list">
+                <div class="device-item">
+                    <h3>客厅灯</h3>
+                    <div class="device-controls">
+                        <button class="device-btn" data-device="living_room_light" data-action="on">开</button>
+                        <button class="device-btn" data-device="living_room_light" data-action="off">关</button>
+                        <input type="range" min="0" max="100" value="50" class="brightness-slider" data-device="living_room_light">
+                        <span class="brightness-value">50%</span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    
+    <script src="../static/js/app.js"></script>
+</body>
+</html>

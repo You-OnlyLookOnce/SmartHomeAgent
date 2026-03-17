@@ -1,0 +1,17 @@
+{
+  "user_id": "test_user",
+  "updated_at": "2026-03-16T20:44:07.857039",
+  "personality": "温暖、友好",
+  "habits": [
+    "晚上开灯",
+    "设置会议提醒"
+  ],
+  "preferences": {
+    "light_brightness": 70,
+    "reminder_time": "09:00"
+  },
+  "interests": [
+    "智能家居",
+    "效率工具"
+  ]
+}
