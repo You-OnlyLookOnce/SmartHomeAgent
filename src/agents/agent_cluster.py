@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional
 import asyncio
+from src.agents.workflow_engine import SmartHomeWorkflowEngine
+from src.agents.reflection_module import ExecutionReflectionModule
 
 class AgentCluster:
     """Agent集群管理器 - 管理多个Agent实例"""
@@ -9,6 +11,10 @@ class AgentCluster:
         self.task_router = {}
         self._initialize_agents()
         self._setup_task_routing()
+        # 初始化工作流引擎
+        self.workflow_engine = SmartHomeWorkflowEngine(self)
+        # 初始化反思模块
+        self.reflection_module = ExecutionReflectionModule()
     
     def _initialize_agents(self):
         """初始化所有Agent实例"""
@@ -76,35 +82,61 @@ class AgentCluster:
     
     async def execute_task(self, task: str, context: Dict = None) -> Dict:
         """执行任务 - 通过集群路由"""
+        # 检查是否为场景模式请求，使用工作流引擎处理
+        if self.workflow_engine.is_known_scenario(task):
+            result = await self.workflow_engine.execute_with_chain(task)
+            # 对工作流执行结果进行反思
+            reflection = await self.reflection_module.reflect_on_execution(result)
+            result['reflection'] = reflection
+            return result
+        
         # 检查是否需要多Agent协作
         if self._needs_multiple_agents(task):
-            return await self._coordinate_multiple_agents(task, context)
+            result = await self._coordinate_multiple_agents(task, context)
+            # 对多Agent协作结果进行反思
+            reflection = await self.reflection_module.reflect_on_execution(result)
+            result['reflection'] = reflection
+            return result
         
         # 路由到合适的Agent
         agent_id = self.route_task(task)
         
         if not agent_id or agent_id not in self.agents:
-            return {
+            result = {
                 "success": False,
                 "message": "没有找到合适的Agent处理此任务"
             }
+            # 对失败结果进行反思
+            reflection = await self.reflection_module.reflect_on_execution(result)
+            result['reflection'] = reflection
+            return result
         
         # 执行任务
         try:
             agent = self.agents[agent_id]
-            result = await agent.execute(task)
-            return {
+            agent_result = await agent.execute(task)
+            result = {
                 "success": True,
                 "agent": agent.agent_id,
                 "role": agent.role,
-                "result": result
+                "result": agent_result,
+                "execution_log": [{"step": "执行任务", "agent": agent_id, "result": agent_result, "timestamp": "2026-03-17T10:00:00"}]
             }
+            # 对执行结果进行反思
+            reflection = await self.reflection_module.reflect_on_execution(result)
+            result['reflection'] = reflection
+            return result
         except Exception as e:
-            return {
+            result = {
                 "success": False,
                 "message": f"任务执行失败: {str(e)}",
-                "agent": agent_id
+                "agent": agent_id,
+                "execution_log": [{"step": "执行任务", "agent": agent_id, "error": str(e), "timestamp": "2026-03-17T10:00:00"}]
             }
+            # 对失败结果进行反思
+            reflection = await self.reflection_module.reflect_on_execution(result)
+            result['reflection'] = reflection
+            return result
     
     def _needs_multiple_agents(self, task: str) -> bool:
         """判断是否需要多Agent协作"""

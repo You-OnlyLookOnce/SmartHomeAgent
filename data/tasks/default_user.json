@@ -9,5 +9,16 @@
     "status": "pending",
     "created_at": "2026-03-16 12:53:45",
     "updated_at": "2026-03-16 12:53:45"
+  },
+  {
+    "id": "task_1773742173_default_user",
+    "user_id": "default_user",
+    "title": "不存在的任务类型",
+    "due_date": "2026-03-18",
+    "priority": "medium",
+    "description": "",
+    "status": "pending",
+    "created_at": "2026-03-17 18:09:33",
+    "updated_at": "2026-03-17 18:09:33"
   }
 ]

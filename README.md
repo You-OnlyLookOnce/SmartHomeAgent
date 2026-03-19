@@ -16,14 +16,14 @@
 ### 1. 创建隔离环境
 
 ```bash
-# 使用venv创建虚拟环境
-python -m venv venv
+# 使用conda创建虚拟环境
+conda create -n Home_Agent python=3.11
 
 # 激活虚拟环境
 # Windows
-env\Scripts\activate
+conda activate Home_Agent
 # Linux/Mac
-source venv/bin/activate
+conda activate Home_Agent
 
 # 安装依赖
 pip install -r requirements.txt
@@ -128,6 +128,11 @@ python -m http.server 8080
 - **混合检索**：向量检索 + 关键词检索 + 规则匹配
 - **记忆蒸馏**：自动学习和优化知识库
 - **Gateway崩溃自修复**：系统高可用性
+- **Self-Reflection机制**：对系统行为进行反思和改进
+- **幻觉检测**：检测和处理大模型的幻觉
+- **Workflow Engine**：编排和执行复杂工作流
+- **SAGE风格用户画像**：分层用户画像管理
+- **Lares风格意图/动作分离**：提高任务处理可靠性
 
 ## 技术栈
 
