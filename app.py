@@ -65,4 +65,6 @@ app = gateway.app
 if __name__ == "__main__":
     # 启动API服务器
     print(f"启动服务在端口 {port}...")
+    import logging
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     gateway.run(host="localhost", port=port)

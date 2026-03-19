@@ -62,9 +62,19 @@ function bindSidebarNavigation() {
                     'chat': '聊天',
                     'device': '设备控制',
                     'task': '任务管理',
+                    'memory': '记忆管理',
+                    'scheduler': '定时任务',
+                    'distillation': '记忆蒸馏',
                     'status': '系统状态'
                 };
                 sectionTitle.textContent = titles[section] || '聊天';
+            }
+            
+            // 加载对应模块的内容
+            if (section === 'memory') {
+                loadMemoryFiles();
+            } else if (section === 'scheduler') {
+                loadScheduleList();
             }
         });
     });
@@ -270,6 +280,301 @@ function renderTasks(tasks) {
         `;
         taskList.appendChild(taskItem);
     });
+}
+
+// 记忆管理相关函数
+
+// 绑定记忆管理标签页事件
+function bindMemoryTabs() {
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+    
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.getAttribute('data-tab');
+            
+            // 更新标签按钮状态
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // 更新标签内容
+            tabPanes.forEach(pane => pane.classList.remove('active'));
+            document.getElementById(`${tab}-tab`).classList.add('active');
+        });
+    });
+}
+
+// 加载记忆文件
+async function loadMemoryFiles() {
+    try {
+        // 加载人格文件
+        const soulResponse = await fetch('/api/memory/soul');
+        if (soulResponse.ok) {
+            const soulData = await soulResponse.json();
+            if (soulData.success && soulData.data) {
+                document.getElementById('soul-content').value = soulData.data;
+            }
+        }
+        
+        // 加载记忆文件
+        const memoryResponse = await fetch('/api/memory/long-term');
+        if (memoryResponse.ok) {
+            const memoryData = await memoryResponse.json();
+            if (memoryData.success && memoryData.data) {
+                document.getElementById('memory-content').value = memoryData.data;
+            }
+        }
+    } catch (error) {
+        console.error('加载记忆文件失败:', error);
+    }
+}
+
+// 保存人格文件
+async function saveSoulFile() {
+    const content = document.getElementById('soul-content').value;
+    try {
+        const response = await fetch('/api/memory/soul', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ content: content })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                alert('人格文件保存成功');
+            } else {
+                alert('保存失败: ' + (data.message || '未知错误'));
+            }
+        } else {
+            alert('保存失败: API调用失败');
+        }
+    } catch (error) {
+        console.error('保存人格文件失败:', error);
+        alert('保存失败: ' + error.message);
+    }
+}
+
+// 保存记忆文件
+async function saveMemoryFile() {
+    const content = document.getElementById('memory-content').value;
+    try {
+        const response = await fetch('/api/memory/long-term', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ content: content })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                alert('记忆文件保存成功');
+            } else {
+                alert('保存失败: ' + (data.message || '未知错误'));
+            }
+        } else {
+            alert('保存失败: API调用失败');
+        }
+    } catch (error) {
+        console.error('保存记忆文件失败:', error);
+        alert('保存失败: ' + error.message);
+    }
+}
+
+// 定时任务相关函数
+
+// 加载定时任务列表
+async function loadScheduleList() {
+    const scheduleList = document.getElementById('schedule-list');
+    if (!scheduleList) return;
+    
+    try {
+        const response = await fetch('/api/scheduler/list');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                renderScheduleList(data.schedules || []);
+            }
+        }
+    } catch (error) {
+        console.error('加载定时任务失败:', error);
+    }
+}
+
+// 渲染定时任务列表
+function renderScheduleList(schedules) {
+    const scheduleList = document.getElementById('schedule-list');
+    if (!scheduleList) return;
+    
+    scheduleList.innerHTML = '';
+    
+    if (schedules.length === 0) {
+        const emptySchedule = document.createElement('div');
+        emptySchedule.className = 'schedule-item';
+        emptySchedule.innerHTML = '<div class="schedule-content">暂无定时任务</div>';
+        scheduleList.appendChild(emptySchedule);
+        return;
+    }
+    
+    schedules.forEach(schedule => {
+        const scheduleItem = document.createElement('div');
+        scheduleItem.className = 'schedule-item';
+        scheduleItem.innerHTML = `
+            <div class="schedule-content">${schedule.title}</div>
+            <div class="schedule-time">${schedule.time}</div>
+            <div class="schedule-status ${schedule.status || 'pending'}">${schedule.status || '待执行'}</div>
+        `;
+        scheduleList.appendChild(scheduleItem);
+    });
+}
+
+// 创建定时任务
+async function createSchedule() {
+    const taskInput = document.getElementById('schedule-task-input');
+    const timeInput = document.getElementById('schedule-time-input');
+    
+    const task = taskInput.value.trim();
+    const time = timeInput.value;
+    
+    if (!task || !time) {
+        alert('请输入任务内容和时间');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/scheduler/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ title: task, time: time })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                alert('定时任务创建成功');
+                taskInput.value = '';
+                timeInput.value = '';
+                loadScheduleList();
+            } else {
+                alert('创建失败: ' + (data.message || '未知错误'));
+            }
+        } else {
+            alert('创建失败: API调用失败');
+        }
+    } catch (error) {
+        console.error('创建定时任务失败:', error);
+        alert('创建失败: ' + error.message);
+    }
+}
+
+// 记忆蒸馏相关函数
+
+// 开始记忆蒸馏
+async function startDistillation() {
+    const statusDiv = document.getElementById('distillation-status');
+    if (statusDiv) {
+        statusDiv.innerHTML = '<p>正在进行记忆蒸馏...</p>';
+    }
+    
+    try {
+        const response = await fetch('/api/memory/distill', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                if (statusDiv) {
+                    statusDiv.innerHTML = '<p class="success">记忆蒸馏完成！</p>';
+                }
+            } else {
+                if (statusDiv) {
+                    statusDiv.innerHTML = '<p class="error">蒸馏失败: ' + (data.message || '未知错误') + '</p>';
+                }
+            }
+        } else {
+            if (statusDiv) {
+                statusDiv.innerHTML = '<p class="error">蒸馏失败: API调用失败</p>';
+            }
+        }
+    } catch (error) {
+        console.error('记忆蒸馏失败:', error);
+        if (statusDiv) {
+            statusDiv.innerHTML = '<p class="error">蒸馏失败: ' + error.message + '</p>';
+        }
+    }
+}
+
+// 绑定新功能模块的事件
+function bindNewModuleEvents() {
+    // 记忆管理事件
+    const saveSoulBtn = document.getElementById('save-soul-btn');
+    if (saveSoulBtn) {
+        saveSoulBtn.addEventListener('click', saveSoulFile);
+    }
+    
+    const saveMemoryBtn = document.getElementById('save-memory-btn');
+    if (saveMemoryBtn) {
+        saveMemoryBtn.addEventListener('click', saveMemoryFile);
+    }
+    
+    // 定时任务事件
+    const createScheduleBtn = document.getElementById('create-schedule-btn');
+    if (createScheduleBtn) {
+        createScheduleBtn.addEventListener('click', createSchedule);
+    }
+    
+    // 记忆蒸馏事件
+    const startDistillationBtn = document.getElementById('start-distillation-btn');
+    if (startDistillationBtn) {
+        startDistillationBtn.addEventListener('click', startDistillation);
+    }
+    
+    // 绑定记忆管理标签页事件
+    bindMemoryTabs();
+}
+
+// 初始化应用
+function init() {
+    // 绑定事件
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+    
+    // 任务管理事件
+    if (createTaskBtn) {
+        createTaskBtn.addEventListener('click', createTask);
+        taskInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                createTask();
+            }
+        });
+    }
+    
+    // 设备控制事件
+    bindDeviceControls();
+    
+    // 加载任务列表
+    loadTasks();
+    
+    // 绑定侧边栏导航事件
+    bindSidebarNavigation();
+    
+    // 绑定新功能模块的事件
+    bindNewModuleEvents();
 }
 
 // 初始化应用

@@ -117,6 +117,13 @@ python -m http.server 8080
 - **NoteKeeperAgent**：专门处理笔记和记忆管理
 - **TaskManagerAgent**：专门处理任务和提醒管理
 - **SecurityAgent**：专门处理安全监控和告警
+- **ConversationAgent**：专门处理对话和交互
+- **HallucinationDetector**：检测和处理大模型幻觉
+
+### 智能体人格
+- **悦悦 (YueYue)**：温柔体贴的女性家庭管家
+- **人格特征**：温暖、关怀、善解人意（ENFJ类型）
+- **语言风格**：温暖柔和 + emoji 点缀 + 关心问候
 
 ### 安全特性
 - **认证授权**：用户登录和权限管理
@@ -146,16 +153,24 @@ python -m http.server 8080
 
 ```
 Home-AI-Agent/
-├── src/
+├── src/                # 源代码目录
 │   ├── agent/          # Agent基础架构
 │   ├── agents/         # 具体Agent实现
-│   ├── gateway/        # API网关和负载均衡
+│   ├── ai/             # AI模型相关代码
+│   ├── communication/  # 通信相关代码
+│   ├── config/         # 配置相关代码
 │   ├── database/       # 数据库集成
+│   ├── frontend/       # 前端界面
+│   ├── gateway/        # API网关和负载均衡
 │   ├── scheduler/      # 定时任务系统
 │   ├── security/       # 安全模块
 │   ├── skills/         # 原子化技能
-│   └── frontend/       # 前端界面
+│   └── tools/          # 工具相关代码
+├── config/             # 配置文件目录
 ├── data/               # 数据存储
+├── docs/               # 文档目录
+├── examples/           # 示例代码目录
+├── YUEYUE/             # 智能体人格定义
 ├── app.py              # 主应用入口
 ├── requirements.txt    # 依赖项
 └── README.md           # 使用指南

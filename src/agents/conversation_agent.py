@@ -79,9 +79,26 @@ class ConversationAgent(AgentBase):
         
         # 添加灵魂文件信息到上下文
         if soul:
-            enhanced_context.append({"system": f"我的名字是{self.memory_manager.get_agent_name()}，我是一个具有独特个性的智能助手。"})
+            # 从soul文件中获取完整的身份信息
+            agent_name = self.memory_manager.get_agent_name()
+            core_description = soul.get('core_identity', {}).get('description', '')
+            core_purpose = soul.get('core_identity', {}).get('purpose', '')
+            
+            # 构建详细的系统提示
+            system_prompt = f"我的名字是{agent_name}。{core_description}我的目的是：{core_purpose}"
+            
+            # 添加核心指南
             if core_guidelines:
-                enhanced_context.append({"system": f"我的行为指南：{core_guidelines.get('responses', '')}，{core_guidelines.get('action', '')}，{core_guidelines.get('personality', '')}"})
+                guidelines_text = []
+                for key, value in core_guidelines.items():
+                    if isinstance(value, dict):
+                        for sub_key, sub_value in value.items():
+                            guidelines_text.append(f"{sub_key}：{sub_value}")
+                    else:
+                        guidelines_text.append(f"{key}：{value}")
+                system_prompt += " 我的行为指南：" + "，".join(guidelines_text)
+            
+            enhanced_context.append({"system": system_prompt})
         
         # 添加用户偏好到上下文
         if user_preferences:
@@ -112,7 +129,7 @@ class ConversationAgent(AgentBase):
                 # 更新对话历史
                 self._update_conversation_history(user_id, task, response_message)
                 
-                # 更新长期记忆
+                # 更新记忆
                 conversation = {
                     "timestamp": time.time(),
                     "user": task,
@@ -120,7 +137,7 @@ class ConversationAgent(AgentBase):
                     "tool_used": tool_name,
                     "tool_result": tool_result
                 }
-                self.memory_manager.update_long_term_memory(user_id, conversation)
+                self.memory_manager.update_memory(conversation)
                 
                 return {
                     "success": True,
@@ -141,14 +158,14 @@ class ConversationAgent(AgentBase):
                     # 更新对话历史
                     self._update_conversation_history(user_id, task, error_response)
                     
-                    # 更新长期记忆
+                    # 更新记忆
                     conversation = {
                         "timestamp": time.time(),
                         "user": task,
                         "assistant": error_response,
                         "error": "Incomplete response"
                     }
-                    self.memory_manager.update_long_term_memory(user_id, conversation)
+                    self.memory_manager.update_memory(conversation)
                     
                     return {
                         "success": False,
@@ -159,13 +176,13 @@ class ConversationAgent(AgentBase):
                     # 更新对话历史
                     self._update_conversation_history(user_id, task, response_message)
                     
-                    # 更新长期记忆
+                    # 更新记忆
                     conversation = {
                         "timestamp": time.time(),
                         "user": task,
                         "assistant": response_message
                     }
-                    self.memory_manager.update_long_term_memory(user_id, conversation)
+                    self.memory_manager.update_memory(conversation)
                     
                     return {
                         "success": True,
@@ -179,14 +196,14 @@ class ConversationAgent(AgentBase):
             # 更新对话历史
             self._update_conversation_history(user_id, task, error_message)
             
-            # 更新长期记忆
+            # 更新记忆
             conversation = {
                 "timestamp": time.time(),
                 "user": task,
                 "assistant": error_message,
                 "error": llm_result.get('error', '未知错误')
             }
-            self.memory_manager.update_long_term_memory(user_id, conversation)
+            self.memory_manager.update_memory(conversation)
             
             return {
                 "success": False,

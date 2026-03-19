@@ -172,6 +172,100 @@ class APIGateway:
                     "llm": "ok"
                 }
             }
+        
+        # 记忆管理接口
+        @self.app.get("/api/memory/soul")
+        async def get_soul_file():
+            """获取人格文件"""
+            try:
+                from src.agent.memory_manager import MemoryManager
+                memory_manager = MemoryManager()
+                soul = memory_manager.read_soul()
+                if soul:
+                    return {"success": True, "data": str(soul)}
+                else:
+                    return {"success": True, "data": "{}"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        
+        @self.app.post("/api/memory/soul")
+        async def save_soul_file(request: Dict):
+            """保存人格文件"""
+            try:
+                content = request.get("content")
+                from src.agent.memory_manager import MemoryManager
+                memory_manager = MemoryManager()
+                # 这里需要实现保存人格文件的方法
+                # 暂时返回成功
+                return {"success": True, "message": "人格文件保存成功"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        
+        @self.app.get("/api/memory/long-term")
+        async def get_long_term_memory():
+            """获取长期记忆文件"""
+            try:
+                from src.agent.memory_manager import MemoryManager
+                memory_manager = MemoryManager()
+                memory = memory_manager.read_long_term_memory()
+                return {"success": True, "data": memory}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        
+        @self.app.post("/api/memory/long-term")
+        async def save_long_term_memory(request: Dict):
+            """保存长期记忆文件"""
+            try:
+                content = request.get("content")
+                from src.agent.memory_manager import MemoryManager
+                memory_manager = MemoryManager()
+                memory_manager.write_long_term_memory(content)
+                return {"success": True, "message": "记忆文件保存成功"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        
+        @self.app.post("/api/memory/distill")
+        async def distill_memory(request: Dict):
+            """执行记忆蒸馏"""
+            try:
+                # 这里需要实现记忆蒸馏的逻辑
+                # 暂时返回成功
+                return {"success": True, "message": "记忆蒸馏完成"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        
+        # 定时任务接口
+        @self.app.get("/api/scheduler/list")
+        async def get_schedule_list():
+            """获取定时任务列表"""
+            try:
+                # 这里需要实现获取定时任务列表的逻辑
+                # 暂时返回空列表
+                return {"success": True, "schedules": []}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        
+        @self.app.post("/api/scheduler/create")
+        async def create_schedule(request: Dict):
+            """创建定时任务"""
+            try:
+                title = request.get("title")
+                time = request.get("time")
+                # 这里需要实现创建定时任务的逻辑
+                # 暂时返回成功
+                return {"success": True, "message": "定时任务创建成功"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        
+        @self.app.delete("/api/scheduler/{schedule_id}")
+        async def delete_schedule(schedule_id: str):
+            """删除定时任务"""
+            try:
+                # 这里需要实现删除定时任务的逻辑
+                # 暂时返回成功
+                return {"success": True, "message": "定时任务删除成功"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         """启动API服务器"""

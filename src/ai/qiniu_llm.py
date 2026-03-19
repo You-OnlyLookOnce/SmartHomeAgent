@@ -12,13 +12,38 @@ logger = logging.getLogger(__name__)
 class QiniuLLM:
     """七牛云大模型客户端（真实API调用）"""
     
-    def __init__(self):
-        """初始化七牛云大模型"""
+    def __init__(self, model_type: str = "decision"):
+        """初始化七牛云大模型
+        
+        Args:
+            model_type: 模型类型，可选值："decision"（决策模型）或 "expert"（专家模型）
+        """
         load_dotenv()
         # 七牛云 AI API 需要使用专门的 API Key，而不是普通的 Access Key
         self.api_key = os.getenv('QINIU_AI_API_KEY', os.getenv('QINIU_ACCESS_KEY'))
-        # 使用七牛云支持的模型名称
-        self.model = "gemini-2.5-flash"
+        
+        # 从配置文件读取模型设置
+        config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "modules", "model_config.json")
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            if "model" in config and model_type in config["model"]:
+                model_config = config["model"][model_type]
+                self.model = model_config.get("name", "qwen-max")
+                self.temperature = model_config.get("temperature", 0.7)
+                self.max_tokens = model_config.get("max_tokens", 2048)
+            else:
+                # 默认值
+                self.model = "qwen-max"
+                self.temperature = 0.7
+                self.max_tokens = 2048
+        except Exception as e:
+            logger.error(f"Failed to read model config: {e}")
+            # 使用默认值
+            self.model = "qwen-max"
+            self.temperature = 0.7
+            self.max_tokens = 2048
+        
         # 七牛云AI API的正确接入点（兼容OpenAI API）
         self.api_url = "https://api.qnaigc.com/v1/chat/completions"
         
@@ -118,10 +143,9 @@ class QiniuLLM:
         retry_count = 0
         while retry_count < max_retries:
             try:
-                async with aiohttp.ClientSession() as session:
-                    # 设置超时
-                    timeout_obj = aiohttp.ClientTimeout(total=timeout)
-                    session = aiohttp.ClientSession(timeout=timeout_obj)
+                # 设置超时
+                timeout_obj = aiohttp.ClientTimeout(total=timeout)
+                async with aiohttp.ClientSession(timeout=timeout_obj) as session:
                     
                     # 根据方法类型发送请求
                     if method == "GET":
@@ -298,7 +322,7 @@ class QiniuLLM:
                 "model": self.model,
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "temperature": 0.7,
+                "temperature": self.temperature,
                 "top_p": 0.95,
                 "stream": stream
             }

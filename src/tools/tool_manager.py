@@ -1,5 +1,8 @@
 from typing import Dict, List, Optional, Callable, Any
 import asyncio
+import subprocess
+import os
+import json
 
 class Tool:
     """工具基类"""
@@ -59,6 +62,41 @@ class ToolManager:
             "获取当前时间",
             self._get_time
         )
+        
+        # 注册浏览器工具
+        self.register_tool(
+            "browser_use",
+            "控制浏览器，参数：action (操作类型), url (网页URL), params (其他参数)",
+            self._browser_use
+        )
+        
+        # 注册命令行工具
+        self.register_tool(
+            "execute_shell_command",
+            "执行命令行指令，参数：command (要执行的命令), timeout (超时时间)",
+            self._execute_shell_command
+        )
+        
+        # 注册文件读取工具
+        self.register_tool(
+            "read_file",
+            "读取文本文件，参数：file_path (文件路径)",
+            self._read_file
+        )
+        
+        # 注册文件写入工具
+        self.register_tool(
+            "write_file",
+            "写入/创建文本文件，参数：file_path (文件路径), content (文件内容)",
+            self._write_file
+        )
+        
+        # 注册记忆搜索工具
+        self.register_tool(
+            "memory_search",
+            "语义搜索记忆，参数：query (搜索查询), max_results (最大返回结果数)",
+            self._memory_search
+        )
     
     def register_tool(self, name: str, description: str, func: Callable):
         """注册工具"""
@@ -77,6 +115,36 @@ class ToolManager:
             }
             for tool in self.tools.values()
         ]
+    
+    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+        """获取工具定义，用于LLM工具调用"""
+        tool_definitions = []
+        for tool_name, tool in self.tools.items():
+            # 简化版工具定义
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": tool.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            }
+            tool_definitions.append(tool_def)
+        return tool_definitions
+    
+    async def execute_tool(self, tool_name: str, **kwargs) -> Dict[str, Any]:
+        """执行指定工具"""
+        tool = self.get_tool(tool_name)
+        if not tool:
+            return {
+                "success": False,
+                "error": f"Tool {tool_name} not found"
+            }
+        return await tool.execute(**kwargs)
     
     async def _control_device(self, device_id: str, action: str, params: Dict = None) -> Dict[str, Any]:
         """控制设备"""
@@ -114,3 +182,92 @@ class ToolManager:
         return {
             "time": current_time
         }
+    
+    async def _browser_use(self, action: str, url: str, params: Dict = None) -> Dict[str, Any]:
+        """控制浏览器"""
+        # 模拟浏览器操作
+        return {
+            "action": action,
+            "url": url,
+            "params": params,
+            "message": f"已执行{action}操作，访问{url}"
+        }
+    
+    async def _execute_shell_command(self, command: str, timeout: int = 30) -> Dict[str, Any]:
+        """执行命令行指令"""
+        try:
+            # 执行命令
+            result = subprocess.run(
+                command, 
+                shell=True, 
+                capture_output=True, 
+                text=True, 
+                timeout=timeout
+            )
+            return {
+                "command": command,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                "command": command,
+                "error": f"Command timed out after {timeout} seconds"
+            }
+        except Exception as e:
+            return {
+                "command": command,
+                "error": str(e)
+            }
+    
+    async def _read_file(self, file_path: str) -> Dict[str, Any]:
+        """读取文本文件"""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return {
+                "file_path": file_path,
+                "content": content
+            }
+        except Exception as e:
+            return {
+                "file_path": file_path,
+                "error": str(e)
+            }
+    
+    async def _write_file(self, file_path: str, content: str) -> Dict[str, Any]:
+        """写入/创建文本文件"""
+        try:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return {
+                "file_path": file_path,
+                "message": "文件写入成功"
+            }
+        except Exception as e:
+            return {
+                "file_path": file_path,
+                "error": str(e)
+            }
+    
+    async def _memory_search(self, query: str, max_results: int = 5) -> Dict[str, Any]:
+        """语义搜索记忆"""
+        # 模拟记忆搜索
+        return {
+            "query": query,
+            "max_results": max_results,
+            "results": [
+                {
+                    "content": "这是一条模拟的记忆结果",
+                    "score": 0.95
+                },
+                {
+                    "content": "这是另一条模拟的记忆结果",
+                    "score": 0.88
+                }
+            ]
+        }
+

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>小酷 - 智能家居助手</title>
+    <title>悦悦 - 智能家居助手</title>
     <link rel="stylesheet" href="../static/css/style.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
         <!-- 左侧功能列表 -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h1 class="app-title">🌤️ 小酷</h1>
+                <h1 class="app-title">🌤️ 悦悦</h1>
                 <p class="app-subtitle">你的智能家居伙伴</p>
             </div>
             
@@ -28,6 +28,18 @@
                     <li class="nav-item" data-section="task">
                         <span class="nav-icon">📋</span>
                         <span class="nav-text">任务管理</span>
+                    </li>
+                    <li class="nav-item" data-section="memory">
+                        <span class="nav-icon">🧠</span>
+                        <span class="nav-text">记忆管理</span>
+                    </li>
+                    <li class="nav-item" data-section="scheduler">
+                        <span class="nav-icon">⏰</span>
+                        <span class="nav-text">定时任务</span>
+                    </li>
+                    <li class="nav-item" data-section="distillation">
+                        <span class="nav-icon">🔥</span>
+                        <span class="nav-text">记忆蒸馏</span>
                     </li>
                     <li class="nav-item" data-section="status">
                         <span class="nav-icon">📊</span>
@@ -59,7 +71,7 @@
                     </div>
                     
                     <div class="input-area">
-                        <input type="text" id="message-input" placeholder="跟小酷说点什么..." />
+                        <input type="text" id="message-input" placeholder="跟悦悦说点什么..." />
                         <button class="send-btn" id="send-btn">发送</button>
                     </div>
                 </section>
@@ -92,6 +104,54 @@
                         </div>
                         <div class="task-list" id="task-list">
                             <!-- 任务列表将动态生成 -->
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- 记忆管理区域 -->
+                <section id="memory-section" class="content-section">
+                    <div class="memory-panel">
+                        <h3>记忆管理</h3>
+                        <div class="memory-tabs">
+                            <button class="tab-btn active" data-tab="soul">人格文件 (Soul)</button>
+                            <button class="tab-btn" data-tab="memory">记忆文件 (Memory)</button>
+                        </div>
+                        <div class="tab-content">
+                            <div id="soul-tab" class="tab-pane active">
+                                <textarea id="soul-content" rows="10" placeholder="编辑人格文件内容..."></textarea>
+                                <button class="save-btn" id="save-soul-btn">保存</button>
+                            </div>
+                            <div id="memory-tab" class="tab-pane">
+                                <textarea id="memory-content" rows="10" placeholder="编辑记忆文件内容..."></textarea>
+                                <button class="save-btn" id="save-memory-btn">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- 定时任务区域 -->
+                <section id="scheduler-section" class="content-section">
+                    <div class="scheduler-panel">
+                        <h3>定时任务</h3>
+                        <div class="task-form">
+                            <input type="text" id="schedule-task-input" placeholder="输入任务内容" />
+                            <input type="datetime-local" id="schedule-time-input" />
+                            <button class="save-btn" id="create-schedule-btn">创建任务</button>
+                        </div>
+                        <div class="schedule-list" id="schedule-list">
+                            <!-- 定时任务列表将动态生成 -->
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- 记忆蒸馏区域 -->
+                <section id="distillation-section" class="content-section">
+                    <div class="distillation-panel">
+                        <h3>记忆蒸馏</h3>
+                        <p>记忆蒸馏可以帮助整理和优化你的记忆，提取重要信息并去除冗余内容。</p>
+                        <button class="distill-btn" id="start-distillation-btn">开始蒸馏</button>
+                        <div class="distillation-status" id="distillation-status">
+                            <!-- 蒸馏状态将动态更新 -->
                         </div>
                     </div>
                 </section>
