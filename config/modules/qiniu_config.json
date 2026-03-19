@@ -1,7 +1,7 @@
 {
   "qiniu": {
-    "access_key": "mpS-j9LY8GGP_MPNOypkfX3gosaxtxoiYQsxTv-g",
-    "secret_key": "IfIFhWQjNgg4PfEEHsKl2Fg0QgfA2ZJL4ljBiY5d",
+    "access_key": "0",
+    "secret_key": "0",
     "bucket_name": "your_bucket_name",
     "domain": "https://your_bucket_name.qiniup.com"
   }
