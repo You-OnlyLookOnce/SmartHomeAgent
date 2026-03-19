@@ -49,6 +49,7 @@ SECRET_KEY=your_secret_key_for_encryption
 python app.py
 
 # 服务将在 http://localhost:8000 运行
+# 注意：启动时可能会显示 http://0.0.0.0:8000，这是服务器绑定地址，客户端访问时请使用 http://localhost:8000
 ```
 
 ### 4. 打开前端网页

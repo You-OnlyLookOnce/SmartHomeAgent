@@ -1,10 +1,13 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from typing import Dict, Optional
 import asyncio
 from datetime import datetime
 import time
+import os
 
 class APIGateway:
     """API网关 - 提供RESTful API服务"""
@@ -12,6 +15,8 @@ class APIGateway:
     def __init__(self):
         self.app = FastAPI(title="智能家居智能体API", version="1.0.0")
         self._setup_middleware()
+        self._setup_static_files()
+        self._setup_templates()
         self._setup_routes()
         self._initialize_dependencies()
     
@@ -19,6 +24,19 @@ class APIGateway:
         """初始化依赖"""
         from src.agents.agent_cluster import AgentCluster
         self.agent_cluster = AgentCluster()
+    
+    def _setup_static_files(self):
+        """设置静态文件服务"""
+        # 确保前端静态文件目录存在
+        static_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "static")
+        if os.path.exists(static_dir):
+            self.app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    
+    def _setup_templates(self):
+        """设置模板渲染"""
+        templates_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "templates")
+        if os.path.exists(templates_dir):
+            self.templates = Jinja2Templates(directory=templates_dir)
     
     def _setup_middleware(self):
         """设置中间件"""
@@ -45,8 +63,13 @@ class APIGateway:
         """设置路由"""
         
         @self.app.get("/")
-        async def root():
-            return {"message": "智能家居智能体API", "version": "1.0.0"}
+        async def root(request: Request):
+            """返回前端HTML页面"""
+            try:
+                return self.templates.TemplateResponse("index.html", {"request": request})
+            except AttributeError:
+                # 如果模板未设置，返回API信息
+                return {"message": "智能家居智能体API", "version": "1.0.0"}
         
         @self.app.post("/api/chat")
         async def chat(request: Dict):
@@ -54,11 +77,25 @@ class APIGateway:
             user_input = request.get("message", "")
             user_id = request.get("user_id", "default_user")
             
-            result = await self.agent_cluster.execute_task(user_input)
+            # 传递用户ID作为上下文
+            context = {"user_id": user_id}
+            result = await self.agent_cluster.execute_task(user_input, context=context)
+            
+            # 处理不同Agent的返回格式
+            response_data = result.get("result", {})
+            if isinstance(response_data, dict) and "message" in response_data:
+                # 如果result是一个包含message字段的字典，直接使用它
+                response = response_data
+            elif isinstance(response_data, dict) and "success" in response_data:
+                # 如果result是一个完整的响应对象，直接使用它
+                response = response_data
+            else:
+                # 否则使用默认格式
+                response = response_data
             
             return {
                 "success": result.get("success", False),
-                "response": result.get("result", {}),
+                "response": response,
                 "agent": result.get("agent", "unknown"),
                 "timestamp": datetime.now().isoformat()
             }

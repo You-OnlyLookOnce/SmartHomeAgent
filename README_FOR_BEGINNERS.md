@@ -41,17 +41,38 @@
 
 ## 第三步：安装依赖
 
-1. 打开命令提示符（Windows）或终端（Mac/Linux）
-2. 导航到项目文件夹（比如解压到桌面，输入 `cd Desktop/Home-AI-Agent`）
-3. 输入以下命令并按Enter键：
-   ```
-   conda create -n Home_Agent python=3.11
-   ```
-4. 激活虚拟环境：
-   - Windows：输入 `conda activate Home_Agent`
-   - Mac/Linux：输入 `conda activate Home_Agent`
-5. 安装依赖：输入 `pip install -r requirements.txt`
-6. 等待安装完成（可能需要几分钟）
+1. **打开命令提示符或终端**：
+   - Windows用户：点击开始菜单，搜索"命令提示符"并打开
+   - Mac用户：打开Finder，进入"应用程序" > "实用工具" > "终端"
+   - Linux用户：打开终端应用
+
+2. **导航到项目文件夹**：
+   - 如果项目解压到桌面，输入以下命令并按Enter键：
+     ```
+     cd Desktop/Home-AI-Agent
+     ```
+   - 如果项目在其他位置，将路径替换为实际位置
+
+3. **创建conda虚拟环境**：
+   - 输入以下命令并按Enter键：
+     ```
+     conda create -n Home_Agent python=3.11
+     ```
+   - 系统会询问是否安装依赖，输入 `y` 并按Enter键
+   - 等待环境创建完成（可能需要几分钟）
+
+4. **激活虚拟环境**：
+   - Windows用户：输入 `conda activate Home_Agent` 并按Enter键
+   - Mac/Linux用户：输入 `conda activate Home_Agent` 并按Enter键
+   - 激活成功后，命令提示符或终端前面会显示 `(Home_Agent)`
+
+5. **安装项目依赖**：
+   - 在激活的环境中，输入以下命令并按Enter键：
+     ```
+     pip install -r requirements.txt
+     ```
+   - 等待依赖安装完成（可能需要几分钟，取决于网络速度）
+   - 安装成功后，会看到"Successfully installed"的提示
 
 ## 第四步：配置API密钥
 
@@ -70,16 +91,39 @@
 
 ## 第五步：启动服务
 
-1. 在命令提示符或终端中，确保虚拟环境已激活（前面有 `(Home_Agent)` 字样）
-2. 输入 `python app.py` 并按Enter键
-3. 看到类似 "Uvicorn running on http://0.0.0.0:8000" 的消息，说明服务启动成功
-4. 不要关闭这个窗口！
+1. **确保虚拟环境已激活**：
+   - 查看命令提示符或终端前面是否显示 `(Home_Agent)`
+   - 如果没有显示，按照第三步的步骤重新激活环境
+
+2. **启动服务**：
+   - 在激活的环境中，输入以下命令并按Enter键：
+     ```
+     python app.py
+     ```
+
+3. **确认服务启动成功**：
+   - 等待几秒钟，你会看到类似 "Uvicorn running on http://0.0.0.0:8000" 的消息
+   - 这表示服务已经成功启动
+   - 注意：0.0.0.0是服务器绑定地址，你需要在浏览器中使用 http://localhost:8000 访问
+
+4. **保持窗口打开**：
+   - 不要关闭这个命令提示符或终端窗口
+   - 如果关闭窗口，服务会停止运行
 
 ## 第六步：打开网页界面
 
-1. 打开浏览器（Chrome、Edge、Firefox等）
-2. 在地址栏输入 `http://localhost:8000` 并按Enter键
-3. 你应该能看到智能家居助手的界面了！
+1. **打开浏览器**：
+   - 打开你常用的浏览器，如Chrome、Edge、Firefox等
+
+2. **访问服务**：
+   - 在浏览器的地址栏中输入 `http://localhost:8000`
+   - 按Enter键访问
+
+3. **查看界面**：
+   - 你应该能看到智能家居助手的界面
+   - 界面上方有"小酷 - 智能家居助手"的标题
+   - 中间是聊天区域，下方是输入框
+   - 右侧是设备控制面板
 
 ## 如何使用
 

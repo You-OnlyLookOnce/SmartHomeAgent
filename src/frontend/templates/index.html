@@ -8,43 +8,120 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- 顶部晨光栏 -->
-        <header class="sunrise-header">
-            <div class="sunrise-glow"></div>
-            <h1 class="app-title">🌤️ 小酷</h1>
-            <p class="app-subtitle">你的智能家居伙伴</p>
-        </header>
+        <!-- 左侧功能列表 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1 class="app-title">🌤️ 小酷</h1>
+                <p class="app-subtitle">你的智能家居伙伴</p>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <ul>
+                    <li class="nav-item active" data-section="chat">
+                        <span class="nav-icon">💬</span>
+                        <span class="nav-text">聊天</span>
+                    </li>
+                    <li class="nav-item" data-section="device">
+                        <span class="nav-icon">🏠</span>
+                        <span class="nav-text">设备控制</span>
+                    </li>
+                    <li class="nav-item" data-section="task">
+                        <span class="nav-icon">📋</span>
+                        <span class="nav-text">任务管理</span>
+                    </li>
+                    <li class="nav-item" data-section="status">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-text">系统状态</span>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
         
-        <!-- 对话区域 -->
-        <main class="chat-area" id="chat-area">
-            <div class="message received">
-                <div class="avatar">🌟</div>
-                <div class="bubble">你好呀！有什么我可以帮你的吗？</div>
+        <!-- 主内容区域 -->
+        <main class="main-content">
+            <!-- 顶部栏 -->
+            <header class="top-bar">
+                <h2 class="section-title" id="section-title">聊天</h2>
+                <div class="top-actions">
+                    <button class="action-btn">设置</button>
+                </div>
+            </header>
+            
+            <!-- 内容区域 -->
+            <div class="content-area">
+                <!-- 聊天区域 -->
+                <section id="chat-section" class="content-section active">
+                    <div class="chat-area" id="chat-area">
+                        <div class="message received">
+                            <div class="avatar">🌟</div>
+                            <div class="bubble">你好呀！有什么我可以帮你的吗？</div>
+                        </div>
+                    </div>
+                    
+                    <div class="input-area">
+                        <input type="text" id="message-input" placeholder="跟小酷说点什么..." />
+                        <button class="send-btn" id="send-btn">发送</button>
+                    </div>
+                </section>
+                
+                <!-- 设备控制区域 -->
+                <section id="device-section" class="content-section">
+                    <div class="device-panel" id="device-panel">
+                        <h3>设备控制</h3>
+                        <div class="device-list">
+                            <div class="device-item">
+                                <h4>客厅灯</h4>
+                                <div class="device-controls">
+                                    <button class="device-btn" data-device="living_room_light" data-action="on">开</button>
+                                    <button class="device-btn" data-device="living_room_light" data-action="off">关</button>
+                                    <input type="range" min="0" max="100" value="50" class="brightness-slider" data-device="living_room_light">
+                                    <span class="brightness-value">50%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- 任务管理区域 -->
+                <section id="task-section" class="content-section">
+                    <div class="task-panel" id="task-panel">
+                        <h3>任务管理</h3>
+                        <div class="task-controls">
+                            <input type="text" id="task-input" placeholder="输入任务内容，如：明天早上8点提醒我开会" />
+                            <button class="task-btn" id="create-task-btn">创建任务</button>
+                        </div>
+                        <div class="task-list" id="task-list">
+                            <!-- 任务列表将动态生成 -->
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- 系统状态区域 -->
+                <section id="status-section" class="content-section">
+                    <div class="status-panel">
+                        <h3>系统状态</h3>
+                        <div class="status-list">
+                            <div class="status-item">
+                                <span class="status-label">服务状态</span>
+                                <span class="status-value status-online">在线</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Agent状态</span>
+                                <span class="status-value status-online">正常</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">API响应</span>
+                                <span class="status-value status-online">正常</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">数据库</span>
+                                <span class="status-value status-online">正常</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
         </main>
-        
-        <!-- 输入区域 -->
-        <footer class="input-area">
-            <input type="text" id="message-input" placeholder="跟小酷说点什么..." />
-            <button class="send-btn" id="send-btn">发送</button>
-        </footer>
-        
-        <!-- 设备控制面板 -->
-        <div class="device-panel" id="device-panel">
-            <h2>设备控制</h2>
-            <div class="device-list">
-                <div class="device-item">
-                    <h3>客厅灯</h3>
-                    <div class="device-controls">
-                        <button class="device-btn" data-device="living_room_light" data-action="on">开</button>
-                        <button class="device-btn" data-device="living_room_light" data-action="off">关</button>
-                        <input type="range" min="0" max="100" value="50" class="brightness-slider" data-device="living_room_light">
-                        <span class="brightness-value">50%</span>
-                    </div>
-                </div>
-
-            </div>
-        </div>
     </div>
     
     <script src="../static/js/app.js"></script>

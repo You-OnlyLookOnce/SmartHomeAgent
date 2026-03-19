@@ -23,8 +23,10 @@ class AgentCluster:
             from src.agents.note_keeper_agent import NoteKeeperAgent
             from src.agents.task_manager_agent import TaskManagerAgent
             from src.agents.security_agent import SecurityAgent
+            from src.agents.conversation_agent import ConversationAgent
             
             self.agents = {
+                "conversation": ConversationAgent(),
                 "device_control": DeviceControlAgent(),
                 "note_keeper": NoteKeeperAgent(),
                 "task_manager": TaskManagerAgent(),
@@ -77,8 +79,8 @@ class AgentCluster:
         elif "安全" in task or "监控" in task or "告警" in task:
             return "security"
         
-        # 默认路由到设备控制Agent
-        return "device_control"
+        # 默认路由到对话Agent处理通用问题
+        return "conversation"
     
     async def execute_task(self, task: str, context: Dict = None) -> Dict:
         """执行任务 - 通过集群路由"""
@@ -114,7 +116,15 @@ class AgentCluster:
         # 执行任务
         try:
             agent = self.agents[agent_id]
-            agent_result = await agent.execute(task)
+            # 从上下文获取用户ID
+            user_id = context.get("user_id", "default_user") if context else "default_user"
+            
+            # 根据Agent类型传递不同参数
+            if agent_id == "conversation":
+                agent_result = await agent.execute(task, user_id=user_id)
+            else:
+                agent_result = await agent.execute(task)
+                
             result = {
                 "success": True,
                 "agent": agent.agent_id,
@@ -142,7 +152,8 @@ class AgentCluster:
         """判断是否需要多Agent协作"""
         # 复杂任务需要多个Agent协作
         complex_tasks = ["场景模式", "综合控制", "全屋控制"]
-        return any(task in task.lower() for task in complex_tasks)
+        task_lower = task.lower()
+        return any(complex_task in task_lower for complex_task in complex_tasks)
     
     async def _coordinate_multiple_agents(self, task: str, context: Dict = None) -> Dict:
         """协调多个Agent完成复杂任务"""

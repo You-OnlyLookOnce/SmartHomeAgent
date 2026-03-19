@@ -4,6 +4,9 @@
 const chatArea = document.getElementById('chat-area');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
+const taskInput = document.getElementById('task-input');
+const createTaskBtn = document.getElementById('create-task-btn');
+const taskList = document.getElementById('task-list');
 
 // 初始化
 function init() {
@@ -15,8 +18,56 @@ function init() {
         }
     });
     
+    // 任务管理事件
+    if (createTaskBtn) {
+        createTaskBtn.addEventListener('click', createTask);
+        taskInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                createTask();
+            }
+        });
+    }
+    
     // 设备控制事件
     bindDeviceControls();
+    
+    // 加载任务列表
+    loadTasks();
+    
+    // 绑定侧边栏导航事件
+    bindSidebarNavigation();
+}
+
+// 绑定侧边栏导航事件
+function bindSidebarNavigation() {
+    const navItems = document.querySelectorAll('.nav-item');
+    const contentSections = document.querySelectorAll('.content-section');
+    const sectionTitle = document.getElementById('section-title');
+    
+    navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const section = item.getAttribute('data-section');
+            
+            // 更新导航项状态
+            navItems.forEach(nav => nav.classList.remove('active'));
+            item.classList.add('active');
+            
+            // 更新内容区域
+            contentSections.forEach(sec => sec.classList.remove('active'));
+            document.getElementById(`${section}-section`).classList.add('active');
+            
+            // 更新标题
+            if (sectionTitle) {
+                const titles = {
+                    'chat': '聊天',
+                    'device': '设备控制',
+                    'task': '任务管理',
+                    'status': '系统状态'
+                };
+                sectionTitle.textContent = titles[section] || '聊天';
+            }
+        });
+    });
 }
 
 // 发送消息
@@ -28,22 +79,39 @@ async function sendMessage() {
     addMessage('sent', message);
     messageInput.value = '';
     
-    // 模拟API调用
+    // 调用后端API
     try {
-        // 这里应该调用后端API
-        // 暂时模拟响应
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message: message, user_id: 'default_user' })
+        });
         
-        const responses = {
-            '开灯': '已经帮你打开了客厅灯！',
-            '关灯': '已经帮你关闭了客厅灯！',
-            '温度': `当前温度是 ${Math.round(Math.random() * 10 + 20)}°C`,
-            '你好': '你好呀！有什么我可以帮你的吗？',
-            '谢谢': '不客气！随时为你服务～'
-        };
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
         
-        let response = responses[message] || `我收到了你的消息: ${message}`;
-        addMessage('received', response);
+        const data = await response.json();
+        
+        if (data.success) {
+            let responseContent = '已收到你的消息';
+            if (typeof data.response === 'object' && data.response !== null) {
+                if (data.response.message) {
+                    responseContent = data.response.message;
+                } else if (data.response.result) {
+                    responseContent = data.response.result;
+                } else if (data.response.success === false) {
+                    responseContent = '抱歉，无法理解你的请求，请换个方式表达。';
+                }
+            } else if (typeof data.response === 'string') {
+                responseContent = data.response;
+            }
+            addMessage('received', responseContent);
+        } else {
+            addMessage('received', '抱歉，出了点问题，请再试试。');
+        }
     } catch (error) {
         addMessage('received', '抱歉，出了点问题，请再试试。');
         console.error('发送消息失败:', error);
@@ -92,23 +160,30 @@ function bindDeviceControls() {
 // 控制设备
 async function controlDevice(deviceId, action, value = null) {
     try {
-        // 这里应该调用后端API
-        // 暂时模拟响应
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // 调用后端API
+        const response = await fetch('/api/device/control', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                device_id: deviceId,
+                action: action,
+                params: value ? { brightness: value } : {}
+            })
+        });
         
-        let message = '';
-        if (deviceId === 'living_room_light') {
-            if (action === 'on') {
-                message = '客厅灯已打开';
-            } else if (action === 'off') {
-                message = '客厅灯已关闭';
-            } else if (action === 'brightness') {
-                message = `客厅灯亮度已调整为 ${value}%`;
-            }
+        if (!response.ok) {
+            throw new Error('API调用失败');
         }
         
-        if (message) {
+        const data = await response.json();
+        
+        if (data.success) {
+            const message = data.message || `设备已${action === 'on' ? '打开' : action === 'off' ? '关闭' : '调整'}`;
             addMessage('received', message);
+        } else {
+            addMessage('received', data.message || '控制设备失败，请再试试。');
         }
     } catch (error) {
         addMessage('received', '控制设备失败，请再试试。');
@@ -117,6 +192,85 @@ async function controlDevice(deviceId, action, value = null) {
 }
 
 
+
+// 创建任务
+async function createTask() {
+    const taskContent = taskInput.value.trim();
+    if (!taskContent) return;
+    
+    try {
+        const response = await fetch('/api/reminder/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ title: taskContent })
+        });
+        
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            addMessage('received', `任务已创建: ${taskContent}`);
+            taskInput.value = '';
+            loadTasks();
+        } else {
+            addMessage('received', '创建任务失败，请再试试。');
+        }
+    } catch (error) {
+        addMessage('received', '创建任务失败，请再试试。');
+        console.error('创建任务失败:', error);
+    }
+}
+
+// 加载任务列表
+async function loadTasks() {
+    if (!taskList) return;
+    
+    try {
+        const response = await fetch('/api/reminder/list/default_user');
+        
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            renderTasks(data.reminders);
+        }
+    } catch (error) {
+        console.error('加载任务失败:', error);
+    }
+}
+
+// 渲染任务列表
+function renderTasks(tasks) {
+    if (!taskList) return;
+    
+    taskList.innerHTML = '';
+    
+    if (tasks.length === 0) {
+        const emptyTask = document.createElement('div');
+        emptyTask.className = 'task-item';
+        emptyTask.innerHTML = '<div class="task-content">暂无任务</div>';
+        taskList.appendChild(emptyTask);
+        return;
+    }
+    
+    tasks.forEach(task => {
+        const taskItem = document.createElement('div');
+        taskItem.className = 'task-item';
+        taskItem.innerHTML = `
+            <div class="task-content">${task.title || task}</div>
+            <div class="task-status ${task.status || 'pending'}">${task.status || '待处理'}</div>
+        `;
+        taskList.appendChild(taskItem);
+    });
+}
 
 // 初始化应用
 init();

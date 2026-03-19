@@ -9,27 +9,36 @@
     --bg-main: linear-gradient(180deg, #FFF5E6 0%, #FFFBF0 50%, #FFECD2 100%);
     --bg-card: rgba(255, 255, 255, 0.85);
     --bg-glass: rgba(255, 255, 255, 0.6);
+    --bg-sidebar: #ffffff;
+    --bg-topbar: rgba(255, 255, 255, 0.9);
     
     /* 文字色 */
     --text-primary: #5D4E37;         /* 温暖深棕 */
     --text-secondary: #8B7355;       /* 柔和棕 */
     --text-muted: #B8A99A;           /* 淡棕 */
+    --text-sidebar: #5D4E37;
+    --text-sidebar-active: #FFB347;
     
     /* 功能色 */
     --success: #7CB342;              /* 清新绿 */
     --warning: #FFB74D;              /* 温暖橙 */
     --error: #E57373;                 /* 柔和红 */
     --info: #64B5F6;                 /* 天空蓝 */
+    --online: #4CAF50;
+    --offline: #F44336;
     
     /* 特效 */
     --shadow-warm: 0 4px 20px rgba(255, 179, 71, 0.15);
     --shadow-card: 0 8px 32px rgba(93, 78, 55, 0.08);
+    --shadow-sidebar: 2px 0 10px rgba(0, 0, 0, 0.05);
+    --shadow-topbar: 0 2px 8px rgba(0, 0, 0, 0.05);
     --glow-subtle: 0 0 20px rgba(255, 204, 51, 0.2);
     
     /* 圆角 */
     --radius-small: 12px;
     --radius-medium: 20px;
     --radius-large: 32px;
+    --radius-sidebar: 0 var(--radius-large) var(--radius-large) 0;
     
     /* 动画 */
     --transition-smooth: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -46,18 +55,209 @@ body {
     background: var(--bg-main);
     color: var(--text-primary);
     min-height: 100vh;
+    overflow: hidden;
 }
 
 .app-container {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 20px;
-    min-height: 100vh;
+    width: 100vw;
+    height: 100vh;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
 }
 
-/* 顶部晨光栏 */
+/* 侧边栏 */
+.sidebar {
+    width: 260px;
+    background: var(--bg-sidebar);
+    border-radius: var(--radius-sidebar);
+    box-shadow: var(--shadow-sidebar);
+    display: flex;
+    flex-direction: column;
+    padding: 20px 0;
+    z-index: 100;
+}
+
+.sidebar-header {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    text-align: center;
+}
+
+.sidebar-header .app-title {
+    font-size: 1.5rem;
+    margin-bottom: 5px;
+    color: var(--text-primary);
+    text-shadow: none;
+}
+
+.sidebar-header .app-subtitle {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.sidebar-nav {
+    flex: 1;
+    padding: 20px 0;
+}
+
+.sidebar-nav ul {
+    list-style: none;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    border-radius: 0 var(--radius-small) var(--radius-small) 0;
+    margin: 4px 0;
+}
+
+.nav-item:hover {
+    background: var(--bg-secondary);
+}
+
+.nav-item.active {
+    background: var(--theme-primary);
+    color: white;
+    font-weight: 500;
+}
+
+.nav-icon {
+    font-size: 1.2rem;
+    margin-right: 12px;
+    width: 24px;
+    text-align: center;
+}
+
+.nav-text {
+    font-size: 1rem;
+}
+
+/* 主内容区域 */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 20px;
+}
+
+/* 顶部栏 */
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: var(--bg-topbar);
+    border-radius: var(--radius-medium);
+    box-shadow: var(--shadow-topbar);
+    margin-bottom: 20px;
+}
+
+.section-title {
+    font-size: 1.3rem;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.top-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.action-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: var(--radius-small);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    font-size: 0.9rem;
+}
+
+.action-btn:hover {
+    background: var(--theme-primary);
+    color: white;
+    transform: translateY(-2px);
+}
+
+/* 内容区域 */
+.content-area {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+.content-section {
+    display: none;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.content-section.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* 系统状态面板 */
+.status-panel {
+    background: var(--bg-card);
+    border-radius: var(--radius-medium);
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+}
+
+.status-panel h3 {
+    margin-bottom: 20px;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--bg-glass);
+    border-radius: var(--radius-small);
+    box-shadow: var(--shadow-card);
+}
+
+.status-label {
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.status-value {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.status-online {
+    background: var(--online);
+    color: white;
+}
+
+.status-offline {
+    background: var(--offline);
+    color: white;
+}
+
+/* 顶部晨光栏（已废弃，使用侧边栏替代） */
 .sunrise-header {
     position: relative;
     background: var(--theme-primary);
@@ -67,6 +267,7 @@ body {
     margin-bottom: 20px;
     box-shadow: var(--shadow-warm);
     overflow: hidden;
+    display: none;
 }
 
 .sunrise-glow {
@@ -109,7 +310,7 @@ body {
     margin-bottom: 20px;
     box-shadow: var(--shadow-card);
     overflow-y: auto;
-    max-height: 400px;
+    min-height: 300px;
 }
 
 .message {
@@ -296,6 +497,111 @@ body {
     transform: translateY(-2px);
 }
 
+/* 任务管理面板 */
+.task-panel {
+    background: var(--bg-card);
+    border-radius: var(--radius-medium);
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+    margin-top: 20px;
+}
+
+.task-panel h2 {
+    margin-bottom: 20px;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.task-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.task-controls input {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    border-radius: var(--radius-small);
+    background: var(--bg-glass);
+    box-shadow: var(--shadow-card);
+    font-size: 1rem;
+    color: var(--text-primary);
+    transition: var(--transition-smooth);
+}
+
+.task-controls input:focus {
+    outline: none;
+    box-shadow: var(--glow-subtle);
+    transform: translateY(-2px);
+}
+
+.task-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: var(--radius-small);
+    background: var(--success);
+    color: white;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    box-shadow: var(--shadow-warm);
+}
+
+.task-btn:hover {
+    background: #689F38;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(124, 179, 66, 0.3);
+}
+
+.task-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.task-item {
+    background: var(--bg-glass);
+    border-radius: var(--radius-small);
+    padding: 15px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-card);
+    transition: var(--transition-smooth);
+}
+
+.task-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(93, 78, 55, 0.15);
+}
+
+.task-content {
+    flex: 1;
+    font-size: 1rem;
+    color: var(--text-primary);
+    word-wrap: break-word;
+}
+
+.task-status {
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: var(--transition-smooth);
+}
+
+.task-status.pending {
+    background: var(--warning);
+    color: white;
+}
+
+.task-status.completed {
+    background: var(--success);
+    color: white;
+}
+
 /* 响应式设计 */
 @media (max-width: 600px) {
     .app-container {
@@ -320,6 +626,15 @@ body {
     }
     
     .brightness-slider {
+        width: 100%;
+    }
+    
+    .task-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .task-btn {
         width: 100%;
     }
 }

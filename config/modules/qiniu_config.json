@@ -1,8 +1,8 @@
 {
   "qiniu": {
-    "access_key": "111",
-    "secret_key": "111",
-    "bucket_name": "你的存储空间名称",
-    "domain": "你的域名"
+    "access_key": "mpS-j9LY8GGP_MPNOypkfX3gosaxtxoiYQsxTv-g",
+    "secret_key": "IfIFhWQjNgg4PfEEHsKl2Fg0QgfA2ZJL4ljBiY5d",
+    "bucket_name": "your_bucket_name",
+    "domain": "https://your_bucket_name.qiniup.com"
   }
 }
