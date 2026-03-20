@@ -4,7 +4,7 @@ import sys
 from src.gateway.api_gateway import APIGateway
 
 # 检查并释放端口
-port = 8001
+port = 8005
 
 def check_and_release_port(port):
     """检查端口是否被占用，并尝试释放"""

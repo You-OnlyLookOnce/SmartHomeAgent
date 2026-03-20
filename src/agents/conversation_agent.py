@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from src.ai.qiniu_llm import QiniuLLM
 from src.tools.tool_manager import ToolManager
 from src.agent.memory_manager import MemoryManager
+from src.agent.session_manager import SessionManager
 
 class ConversationAgent(AgentBase):
     """对话Agent - 专门处理通用对话和问答任务"""
@@ -31,37 +32,44 @@ class ConversationAgent(AgentBase):
         self.tool_manager = ToolManager()
         # 初始化记忆管理器
         self.memory_manager = MemoryManager()
+        # 初始化会话管理器
+        self.session_manager = SessionManager()
         # 加载环境变量以获取API密钥
         load_dotenv()
-        # 对话历史管理
-        self.conversation_history = {}
     
-    async def execute(self, task: str, user_id: str = "default_user") -> Dict:
+    async def execute(self, task: str, user_id: str = "default_user", session_id: str = None) -> Dict:
         """执行对话任务"""
         # 更新状态
-        self.context.append({"user": task, "user_id": user_id})
+        self.context.append({"user": task, "user_id": user_id, "session_id": session_id})
+        
+        # 如果没有提供session_id，创建一个新会话
+        if not session_id:
+            new_chat = self.session_manager.create_session(user_id=user_id)
+            session_id = new_chat["session_id"]
         
         # 获取对话历史
-        history = self._get_conversation_history(user_id)
+        history = self.session_manager.get_conversation_history(session_id)
         
         # 执行对话
-        result = await self._execute_conversation(task, history, user_id)
+        result = await self._execute_conversation(task, history, user_id, session_id)
         
         # 记录日志
         self.execution_log.append({
             "task": task,
             "result": result,
             "user_id": user_id,
+            "session_id": session_id,
             "timestamp": time.time()
         })
         
         return result
     
-    async def _execute_conversation(self, task: str, history: list, user_id: str) -> Dict:
+    async def _execute_conversation(self, task: str, history: list, user_id: str, session_id: str) -> Dict:
         """执行对话逻辑"""
         print("="*50)
         print(f"_execute_conversation called with task: {task}")
         print(f"User ID: {user_id}")
+        print(f"Session ID: {session_id}")
         print(f"History length: {len(history)}")
         print(f"LLM instance: {self.llm}")
         print(f"LLM API key: {self.llm.api_key[:20]}...")
@@ -127,7 +135,7 @@ class ConversationAgent(AgentBase):
                 response_message = self._format_tool_response(tool_result, tool_name, tool_params)
                 
                 # 更新对话历史
-                self._update_conversation_history(user_id, task, response_message)
+                self.session_manager.update_conversation_history(session_id, task, response_message)
                 
                 # 更新记忆
                 conversation = {
@@ -156,7 +164,7 @@ class ConversationAgent(AgentBase):
                     error_response = self._handle_incomplete_response(task)
                     
                     # 更新对话历史
-                    self._update_conversation_history(user_id, task, error_response)
+                    self.session_manager.update_conversation_history(session_id, task, error_response)
                     
                     # 更新记忆
                     conversation = {
@@ -174,7 +182,7 @@ class ConversationAgent(AgentBase):
                 else:
                     # 正常回复
                     # 更新对话历史
-                    self._update_conversation_history(user_id, task, response_message)
+                    self.session_manager.update_conversation_history(session_id, task, response_message)
                     
                     # 更新记忆
                     conversation = {
@@ -194,7 +202,7 @@ class ConversationAgent(AgentBase):
             error_message = self._handle_llm_error(llm_result.get('error', '未知错误'), task)
             
             # 更新对话历史
-            self._update_conversation_history(user_id, task, error_message)
+            self.session_manager.update_conversation_history(session_id, task, error_message)
             
             # 更新记忆
             conversation = {

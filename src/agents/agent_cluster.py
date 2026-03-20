@@ -116,12 +116,13 @@ class AgentCluster:
         # 执行任务
         try:
             agent = self.agents[agent_id]
-            # 从上下文获取用户ID
+            # 从上下文获取用户ID和session_id
             user_id = context.get("user_id", "default_user") if context else "default_user"
+            session_id = context.get("session_id") if context else None
             
             # 根据Agent类型传递不同参数
             if agent_id == "conversation":
-                agent_result = await agent.execute(task, user_id=user_id)
+                agent_result = await agent.execute(task, user_id=user_id, session_id=session_id)
             else:
                 agent_result = await agent.execute(task)
                 

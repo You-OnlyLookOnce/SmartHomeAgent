@@ -23,7 +23,9 @@ class APIGateway:
     def _initialize_dependencies(self):
         """初始化依赖"""
         from src.agents.agent_cluster import AgentCluster
+        from src.agent.session_manager import SessionManager
         self.agent_cluster = AgentCluster()
+        self.session_manager = SessionManager()
     
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -76,9 +78,15 @@ class APIGateway:
             """聊天接口"""
             user_input = request.get("message", "")
             user_id = request.get("user_id", "default_user")
+            session_id = request.get("session_id")
             
-            # 传递用户ID作为上下文
-            context = {"user_id": user_id}
+            # 如果没有提供session_id，创建一个新会话
+            if not session_id:
+                new_chat = self.session_manager.create_session(user_id=user_id)
+                session_id = new_chat["session_id"]
+            
+            # 传递用户ID和session_id作为上下文
+            context = {"user_id": user_id, "session_id": session_id}
             result = await self.agent_cluster.execute_task(user_input, context=context)
             
             # 处理不同Agent的返回格式
@@ -97,6 +105,99 @@ class APIGateway:
                 "success": result.get("success", False),
                 "response": response,
                 "agent": result.get("agent", "unknown"),
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # 对话管理接口
+        @self.app.get("/api/chats")
+        async def get_chats():
+            """获取所有对话列表"""
+            chats = self.session_manager.get_all_sessions()
+            return {
+                "success": True,
+                "chats": chats,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        @self.app.post("/api/chats")
+        async def create_chat(request: Dict):
+            """创建新对话"""
+            name = request.get("name", "New Chat")
+            user_id = request.get("user_id", "default")
+            
+            new_chat = self.session_manager.create_session(name=name, user_id=user_id)
+            return {
+                "success": True,
+                "chat": new_chat,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        @self.app.get("/api/chats/{session_id}")
+        async def get_chat(session_id: str):
+            """获取单个对话信息"""
+            chat = self.session_manager.get_session(session_id)
+            if not chat:
+                return {
+                    "success": False,
+                    "message": "对话不存在",
+                    "timestamp": datetime.now().isoformat()
+                }
+            return {
+                "success": True,
+                "chat": chat,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        @self.app.put("/api/chats/{session_id}")
+        async def update_chat(session_id: str, request: Dict):
+            """更新对话信息"""
+            name = request.get("name")
+            if not name:
+                return {
+                    "success": False,
+                    "message": "缺少对话名称",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            success = self.session_manager.update_session_name(session_id, name)
+            if not success:
+                return {
+                    "success": False,
+                    "message": "对话不存在",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            chat = self.session_manager.get_session(session_id)
+            return {
+                "success": True,
+                "chat": chat,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        @self.app.delete("/api/chats/{session_id}")
+        async def delete_chat(session_id: str):
+            """删除对话"""
+            success = self.session_manager.delete_session(session_id)
+            if not success:
+                return {
+                    "success": False,
+                    "message": "对话不存在",
+                    "timestamp": datetime.now().isoformat()
+                }
+            return {
+                "success": True,
+                "message": "对话删除成功",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        @self.app.get("/api/chats/{session_id}/history")
+        async def get_chat_history(session_id: str):
+            """获取对话历史"""
+            history = self.session_manager.get_conversation_history(session_id)
+            return {
+                "success": True,
+                "history": history,
                 "timestamp": datetime.now().isoformat()
             }
         

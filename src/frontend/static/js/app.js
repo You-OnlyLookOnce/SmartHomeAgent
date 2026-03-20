@@ -7,36 +7,23 @@ const sendBtn = document.getElementById('send-btn');
 const taskInput = document.getElementById('task-input');
 const createTaskBtn = document.getElementById('create-task-btn');
 const taskList = document.getElementById('task-list');
+const chatList = document.getElementById('chat-list');
+const newChatBtn = document.getElementById('new-chat-btn');
+const renameChatBtn = document.getElementById('rename-chat-btn');
+const deleteChatBtn = document.getElementById('delete-chat-btn');
+const sectionTitle = document.getElementById('section-title');
 
-// 初始化
-function init() {
-    // 绑定事件
-    sendBtn.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            sendMessage();
-        }
-    });
-    
-    // 任务管理事件
-    if (createTaskBtn) {
-        createTaskBtn.addEventListener('click', createTask);
-        taskInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                createTask();
-            }
-        });
-    }
-    
-    // 设备控制事件
-    bindDeviceControls();
-    
-    // 加载任务列表
-    loadTasks();
-    
-    // 绑定侧边栏导航事件
-    bindSidebarNavigation();
-}
+// 模态窗口元素
+const nameModal = document.getElementById('name-modal');
+const chatNameInput = document.getElementById('chat-name-input');
+const closeModalBtn = document.getElementById('close-modal-btn');
+const cancelCreateBtn = document.getElementById('cancel-create-btn');
+const confirmCreateBtn = document.getElementById('confirm-create-btn');
+
+// 当前会话ID
+let currentSessionId = null;
+
+// 初始化函数将在后面定义
 
 // 绑定侧边栏导航事件
 function bindSidebarNavigation() {
@@ -96,7 +83,11 @@ async function sendMessage() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ message: message, user_id: 'default_user' })
+            body: JSON.stringify({ 
+                message: message, 
+                user_id: 'default_user',
+                session_id: currentSessionId 
+            })
         });
         
         if (!response.ok) {
@@ -554,6 +545,61 @@ function init() {
         }
     });
     
+    // 对话管理事件
+    console.log('newChatBtn:', newChatBtn);
+    console.log('renameChatBtn:', renameChatBtn);
+    console.log('deleteChatBtn:', deleteChatBtn);
+    
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', createNewChat);
+        console.log('新建对话按钮事件绑定成功');
+    } else {
+        console.error('新建对话按钮未找到');
+    }
+    if (renameChatBtn) {
+        renameChatBtn.addEventListener('click', renameCurrentChat);
+        console.log('重命名按钮事件绑定成功');
+    } else {
+        console.error('重命名按钮未找到');
+    }
+    if (deleteChatBtn) {
+        deleteChatBtn.addEventListener('click', deleteCurrentChat);
+        console.log('删除按钮事件绑定成功');
+    } else {
+        console.error('删除按钮未找到');
+    }
+    
+    // 模态窗口事件
+    if (closeModalBtn) {
+        closeModalBtn.addEventListener('click', closeModal);
+        console.log('关闭模态窗口按钮事件绑定成功');
+    } else {
+        console.error('关闭模态窗口按钮未找到');
+    }
+    if (cancelCreateBtn) {
+        cancelCreateBtn.addEventListener('click', closeModal);
+        console.log('取消创建按钮事件绑定成功');
+    } else {
+        console.error('取消创建按钮未找到');
+    }
+    if (confirmCreateBtn) {
+        confirmCreateBtn.addEventListener('click', confirmCreateChat);
+        console.log('确认创建按钮事件绑定成功');
+    } else {
+        console.error('确认创建按钮未找到');
+    }
+    // 为输入框添加回车键事件
+    if (chatNameInput) {
+        chatNameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                confirmCreateChat();
+            }
+        });
+        console.log('输入框回车键事件绑定成功');
+    } else {
+        console.error('对话名称输入框未找到');
+    }
+    
     // 任务管理事件
     if (createTaskBtn) {
         createTaskBtn.addEventListener('click', createTask);
@@ -575,7 +621,343 @@ function init() {
     
     // 绑定新功能模块的事件
     bindNewModuleEvents();
+    
+    // 加载对话列表
+    loadChats();
 }
 
 // 初始化应用
 init();
+
+// 对话管理相关函数
+
+// 加载对话列表
+async function loadChats() {
+    if (!chatList) return;
+    
+    try {
+        const response = await fetch('/api/chats');
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            renderChatList(data.chats);
+            
+            // 如果没有对话，创建一个默认对话
+            if (data.chats.length === 0) {
+                createNewChat();
+            } else if (!currentSessionId) {
+                // 只有在当前没有会话时才切换到第一个对话
+                switchChat(data.chats[0].session_id, data.chats[0].name);
+            }
+        }
+    } catch (error) {
+        console.error('加载对话列表失败:', error);
+    }
+}
+
+// 渲染对话列表
+function renderChatList(chats) {
+    if (!chatList) return;
+    
+    chatList.innerHTML = '';
+    
+    // 按创建时间降序排序，确保新对话显示在顶部
+    chats.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    chats.forEach(chat => {
+        const chatItem = document.createElement('div');
+        chatItem.className = `chat-item ${currentSessionId === chat.session_id ? 'active' : ''}`;
+        chatItem.dataset.sessionId = chat.session_id;
+        
+        // 格式化时间
+        const timestamp = new Date(chat.updated_at);
+        const timeString = timestamp.toLocaleTimeString('zh-CN', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        
+        chatItem.innerHTML = `
+            <div class="chat-item-content">
+                <div class="chat-item-name">${chat.name}</div>
+                <div class="chat-item-time">${timeString}</div>
+            </div>
+            <div class="chat-item-actions">
+                <button class="chat-item-action-btn" onclick="renameChat('${chat.session_id}', '${chat.name}')">重命名</button>
+                <button class="chat-item-action-btn" onclick="deleteChat('${chat.session_id}')">删除</button>
+            </div>
+        `;
+        
+        // 点击对话项切换对话
+        chatItem.addEventListener('click', (e) => {
+            // 避免点击按钮时触发切换
+            if (!e.target.closest('.chat-item-action-btn')) {
+                switchChat(chat.session_id, chat.name);
+            }
+        });
+        
+        chatList.appendChild(chatItem);
+    });
+}
+
+// 创建新对话
+function createNewChat() {
+    console.log('createNewChat() 被调用');
+    // 显示命名模态窗口
+    nameModal.style.display = 'flex';
+    // 聚焦到输入框
+    chatNameInput.focus();
+}
+
+// 确认创建对话
+async function confirmCreateChat() {
+    const chatName = chatNameInput.value.trim() || '新对话';
+    console.log('确认创建对话，名称:', chatName);
+    
+    try {
+        console.log('开始创建新对话');
+        const response = await fetch('/api/chats', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: chatName })
+        });
+        
+        console.log('创建新对话响应:', response);
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        console.log('创建新对话响应数据:', data);
+        if (data.success) {
+            // 重新加载对话列表
+            console.log('创建新对话成功，开始加载对话列表');
+            loadChats();
+        }
+    } catch (error) {
+        console.error('创建新对话失败:', error);
+    } finally {
+        // 关闭模态窗口
+        closeModal();
+    }
+}
+
+// 关闭模态窗口
+function closeModal() {
+    nameModal.style.display = 'none';
+    // 清空输入框
+    chatNameInput.value = '';
+}
+
+// 切换对话
+async function switchChat(sessionId, chatName) {
+    currentSessionId = sessionId;
+    
+    // 更新标题
+    if (sectionTitle) {
+        sectionTitle.textContent = chatName;
+    }
+    
+    // 清空聊天区域
+    if (chatArea) {
+        chatArea.innerHTML = '';
+    }
+    
+    // 加载对话历史
+    await loadChatHistory(sessionId);
+    
+    // 直接更新对话列表的活跃状态，不重新加载整个对话列表
+    if (chatList) {
+        // 移除所有活跃状态
+        document.querySelectorAll('.chat-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        // 添加当前对话的活跃状态
+        const activeItem = document.querySelector(`.chat-item[data-session-id="${sessionId}"]`);
+        if (activeItem) {
+            activeItem.classList.add('active');
+        }
+    }
+}
+
+// 加载对话历史
+async function loadChatHistory(sessionId) {
+    console.log('loadChatHistory() 被调用，sessionId:', sessionId);
+    if (!chatArea) {
+        console.error('chatArea 未找到');
+        return;
+    }
+    
+    try {
+        console.log('开始加载对话历史');
+        const response = await fetch(`/api/chats/${sessionId}/history`);
+        console.log('加载对话历史响应:', response);
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        console.log('加载对话历史响应数据:', data);
+        if (data.success) {
+            console.log('对话历史长度:', data.history.length);
+            data.history.forEach(message => {
+                if (message.user) {
+                    addMessage('sent', message.user);
+                } else if (message.assistant) {
+                    addMessage('received', message.assistant);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('加载对话历史失败:', error);
+    }
+}
+
+// 重命名对话
+function renameChat(sessionId, currentName) {
+    const newName = prompt('请输入新的对话名称:', currentName);
+    if (newName && newName.trim() !== currentName) {
+        updateChatName(sessionId, newName.trim());
+    }
+}
+
+// 重命名当前对话
+function renameCurrentChat() {
+    if (currentSessionId) {
+        const currentName = sectionTitle.textContent;
+        renameChat(currentSessionId, currentName);
+    }
+}
+
+// 更新对话名称
+async function updateChatName(sessionId, newName) {
+    console.log('updateChatName() 被调用，sessionId:', sessionId, 'newName:', newName);
+    try {
+        console.log('开始更新对话名称');
+        const response = await fetch(`/api/chats/${sessionId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: newName })
+        });
+        
+        console.log('更新对话名称响应:', response);
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        console.log('更新对话名称响应数据:', data);
+        if (data.success) {
+            // 重新加载对话列表
+            console.log('更新对话名称成功，开始加载对话列表');
+            loadChats();
+            
+            // 如果是当前对话，更新标题
+            if (sessionId === currentSessionId && sectionTitle) {
+                console.log('更新当前对话标题:', newName);
+                sectionTitle.textContent = newName;
+            }
+        }
+    } catch (error) {
+        console.error('更新对话名称失败:', error);
+    }
+}
+
+// 删除对话
+function deleteChat(sessionId) {
+    if (confirm('确定要删除这个对话吗？')) {
+        deleteChatById(sessionId);
+    }
+}
+
+// 删除当前对话
+function deleteCurrentChat() {
+    if (currentSessionId) {
+        deleteChat(currentSessionId);
+    }
+}
+
+// 根据ID删除对话
+async function deleteChatById(sessionId) {
+    try {
+        const response = await fetch(`/api/chats/${sessionId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            // 重新加载对话列表
+            loadChats();
+        }
+    } catch (error) {
+        console.error('删除对话失败:', error);
+    }
+}
+
+// 更新发送消息函数
+async function sendMessage() {
+    const message = messageInput.value.trim();
+    if (!message) return;
+    
+    // 添加用户消息
+    addMessage('sent', message);
+    messageInput.value = '';
+    
+    // 调用后端API
+    try {
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                message: message, 
+                user_id: 'default_user',
+                session_id: currentSessionId 
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let responseContent = '已收到你的消息';
+            if (typeof data.response === 'object' && data.response !== null) {
+                if (data.response.message) {
+                    responseContent = data.response.message;
+                } else if (data.response.result) {
+                    responseContent = data.response.result;
+                } else if (data.response.success === false) {
+                    responseContent = '抱歉，无法理解你的请求，请换个方式表达。';
+                }
+            } else if (typeof data.response === 'string') {
+                responseContent = data.response;
+            }
+            addMessage('received', responseContent);
+            
+            // 更新当前会话ID（如果是新创建的对话）
+            if (data.session_id && !currentSessionId) {
+                currentSessionId = data.session_id;
+                // 不需要重新加载对话列表，因为我们已经设置了 currentSessionId
+            }
+        } else {
+            addMessage('received', '抱歉，出了点问题，请再试试。');
+        }
+    } catch (error) {
+        addMessage('received', '抱歉，出了点问题，请再试试。');
+        console.error('发送消息失败:', error);
+    }
+}
