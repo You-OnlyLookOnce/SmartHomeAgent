@@ -23,9 +23,11 @@ class APIGateway:
     def _initialize_dependencies(self):
         """初始化依赖"""
         from src.agents.agent_cluster import AgentCluster
-        from src.agent.session_manager import SessionManager
+        from src.agent.independent_session_manager import IndependentSessionManager
+        from src.scheduler.task_scheduler import TaskScheduler
         self.agent_cluster = AgentCluster()
-        self.session_manager = SessionManager()
+        self.session_manager = IndependentSessionManager()
+        self.task_scheduler = TaskScheduler()
     
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -329,9 +331,11 @@ class APIGateway:
         async def distill_memory(request: Dict):
             """执行记忆蒸馏"""
             try:
-                # 这里需要实现记忆蒸馏的逻辑
-                # 暂时返回成功
-                return {"success": True, "message": "记忆蒸馏完成"}
+                from src.agent.memory_manager import MemoryManager
+                memory_manager = MemoryManager()
+                days = request.get("days", 7)
+                result = memory_manager.distill_memory(days)
+                return result
             except Exception as e:
                 return {"success": False, "message": str(e)}
         
@@ -340,9 +344,17 @@ class APIGateway:
         async def get_schedule_list():
             """获取定时任务列表"""
             try:
-                # 这里需要实现获取定时任务列表的逻辑
-                # 暂时返回空列表
-                return {"success": True, "schedules": []}
+                tasks = self.task_scheduler.get_all_tasks()
+                schedules = []
+                for task in tasks:
+                    schedule = {
+                        "id": task["id"],
+                        "title": task.get("name", task["id"]),
+                        "time": task.get("time", task.get("cron_expr", "")),
+                        "status": "active" if task["enabled"] else "inactive"
+                    }
+                    schedules.append(schedule)
+                return {"success": True, "schedules": schedules}
             except Exception as e:
                 return {"success": False, "message": str(e)}
         
@@ -352,9 +364,37 @@ class APIGateway:
             try:
                 title = request.get("title")
                 time = request.get("time")
-                # 这里需要实现创建定时任务的逻辑
-                # 暂时返回成功
-                return {"success": True, "message": "定时任务创建成功"}
+                cron_expr = request.get("cron_expr")
+                command = request.get("command")
+                
+                if not title or not (time or cron_expr):
+                    return {"success": False, "message": "缺少必要参数"}
+                
+                import uuid
+                task_id = str(uuid.uuid4())
+                
+                if cron_expr:
+                    # 创建CRON任务
+                    async def task_callback():
+                        print(f"执行定时任务: {title}")
+                        return f"任务 {title} 执行成功"
+                    
+                    await self.task_scheduler.schedule_cron_task(task_id, cron_expr, task_callback)
+                elif time:
+                    # 创建每日任务
+                    async def task_callback():
+                        print(f"执行定时任务: {title}")
+                        return f"任务 {title} 执行成功"
+                    
+                    await self.task_scheduler.schedule_daily_task(task_id, time, task_callback)
+                
+                if command:
+                    # 创建Windows计划任务
+                    result = await self.task_scheduler.create_windows_task(title, cron_expr or "0 0 * * *", command)
+                    if not result["success"]:
+                        return result
+                
+                return {"success": True, "message": "定时任务创建成功", "task_id": task_id}
             except Exception as e:
                 return {"success": False, "message": str(e)}
         
@@ -362,13 +402,18 @@ class APIGateway:
         async def delete_schedule(schedule_id: str):
             """删除定时任务"""
             try:
-                # 这里需要实现删除定时任务的逻辑
-                # 暂时返回成功
-                return {"success": True, "message": "定时任务删除成功"}
+                result = self.task_scheduler.delete_task(schedule_id)
+                return result
             except Exception as e:
                 return {"success": False, "message": str(e)}
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         """启动API服务器"""
         import uvicorn
+        import asyncio
+        
+        # 启动任务调度器
+        loop = asyncio.get_event_loop()
+        loop.create_task(self.task_scheduler.start())
+        
         uvicorn.run(self.app, host=host, port=port)

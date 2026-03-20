@@ -24,13 +24,15 @@ class AgentCluster:
             from src.agents.task_manager_agent import TaskManagerAgent
             from src.agents.security_agent import SecurityAgent
             from src.agents.conversation_agent import ConversationAgent
+            from src.agents.react_agent import ReActAgent
             
             self.agents = {
                 "conversation": ConversationAgent(),
                 "device_control": DeviceControlAgent(),
                 "note_keeper": NoteKeeperAgent(),
                 "task_manager": TaskManagerAgent(),
-                "security": SecurityAgent()
+                "security": SecurityAgent(),
+                "react": ReActAgent()
             }
             print("Agent集群初始化成功")
         except Exception as e:
@@ -78,6 +80,9 @@ class AgentCluster:
             return "task_manager"
         elif "安全" in task or "监控" in task or "告警" in task:
             return "security"
+        elif "规划" in task or "决策" in task or "分析" in task or "研究" in task:
+            # 需要复杂决策的任务路由到ReActAgent
+            return "react"
         
         # 默认路由到对话Agent处理通用问题
         return "conversation"

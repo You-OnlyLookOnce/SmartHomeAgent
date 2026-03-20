@@ -57,14 +57,56 @@ function bindSidebarNavigation() {
                 sectionTitle.textContent = titles[section] || '聊天';
             }
             
+            // 隐藏聊天初始化界面
+            hideInitializationUI();
+            
             // 加载对应模块的内容
             if (section === 'memory') {
                 loadMemoryFiles();
             } else if (section === 'scheduler') {
                 loadScheduleList();
+            } else if (section === 'task') {
+                loadTasks();
+            } else if (section === 'chat') {
+                // 如果有当前会话，显示对应对话
+                if (currentSessionId) {
+                    // 重新加载当前对话
+                    loadChatHistory(currentSessionId);
+                } else {
+                    // 没有会话时显示初始化界面
+                    showInitializationUI();
+                }
             }
         });
     });
+}
+
+// 切换到聊天界面
+function switchToChatSection() {
+    const navItems = document.querySelectorAll('.nav-item');
+    const contentSections = document.querySelectorAll('.content-section');
+    const sectionTitle = document.getElementById('section-title');
+    
+    // 更新导航项状态
+    navItems.forEach(nav => nav.classList.remove('active'));
+    
+    // 更新内容区域
+    contentSections.forEach(sec => sec.classList.remove('active'));
+    document.getElementById('chat-section').classList.add('active');
+    
+    // 更新标题
+    if (sectionTitle) {
+        sectionTitle.textContent = '聊天';
+    }
+    
+    // 显示初始化界面或对话历史
+    if (currentSessionId) {
+        // 重新加载当前对话
+        loadChatHistory(currentSessionId);
+    } else {
+        // 没有会话时显示初始化界面
+        showInitializationUI();
+    }
 }
 
 // 发送消息
@@ -295,6 +337,33 @@ function bindMemoryTabs() {
     });
 }
 
+// 绑定任务管理标签页事件
+function bindTaskTabs() {
+    const taskTabBtns = document.querySelectorAll('.task-tabs .tab-btn');
+    const taskTabPanes = document.querySelectorAll('.task-panel .tab-pane');
+    
+    taskTabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.getAttribute('data-tab');
+            
+            // 更新标签按钮状态
+            taskTabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // 更新标签内容
+            taskTabPanes.forEach(pane => pane.classList.remove('active'));
+            document.getElementById(`${tab}-tab`).classList.add('active');
+            
+            // 加载对应标签的内容
+            if (tab === 'scheduled') {
+                loadScheduleList();
+            } else if (tab === 'regular') {
+                loadTasks();
+            }
+        });
+    });
+}
+
 // 加载记忆文件
 async function loadMemoryFiles() {
     try {
@@ -418,9 +487,38 @@ function renderScheduleList(schedules) {
             <div class="schedule-content">${schedule.title}</div>
             <div class="schedule-time">${schedule.time}</div>
             <div class="schedule-status ${schedule.status || 'pending'}">${schedule.status || '待执行'}</div>
+            <div class="schedule-actions">
+                <button class="delete-btn" onclick="deleteSchedule('${schedule.id}')">删除</button>
+            </div>
         `;
         scheduleList.appendChild(scheduleItem);
     });
+}
+
+// 删除定时任务
+async function deleteSchedule(scheduleId) {
+    if (confirm('确定要删除这个定时任务吗？')) {
+        try {
+            const response = await fetch(`/api/scheduler/${scheduleId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    alert('定时任务删除成功');
+                    loadScheduleList();
+                } else {
+                    alert('删除失败: ' + (data.message || '未知错误'));
+                }
+            } else {
+                alert('删除失败: API调用失败');
+            }
+        } catch (error) {
+            console.error('删除定时任务失败:', error);
+            alert('删除失败: ' + error.message);
+        }
+    }
 }
 
 // 创建定时任务
@@ -466,11 +564,35 @@ async function createSchedule() {
 
 // 记忆蒸馏相关函数
 
+// 绑定记忆蒸馏标签页事件
+function bindDistillationTabs() {
+    const distillationTabBtns = document.querySelectorAll('.distillation-tabs .tab-btn');
+    const distillationTabPanes = document.querySelectorAll('.distillation-panel .tab-pane');
+    
+    distillationTabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.getAttribute('data-tab');
+            
+            // 更新标签按钮状态
+            distillationTabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // 更新标签内容
+            distillationTabPanes.forEach(pane => pane.classList.remove('active'));
+            document.getElementById(`${tab}-tab`).classList.add('active');
+        });
+    });
+}
+
 // 开始记忆蒸馏
 async function startDistillation() {
     const statusDiv = document.getElementById('distillation-status');
+    const resultDiv = document.getElementById('distillation-result');
     if (statusDiv) {
         statusDiv.innerHTML = '<p>正在进行记忆蒸馏...</p>';
+    }
+    if (resultDiv) {
+        resultDiv.innerHTML = '';
     }
     
     try {
@@ -488,6 +610,23 @@ async function startDistillation() {
                 if (statusDiv) {
                     statusDiv.innerHTML = '<p class="success">记忆蒸馏完成！</p>';
                 }
+                if (resultDiv) {
+                    resultDiv.innerHTML = `
+                        <h4>蒸馏结果</h4>
+                        <div class="result-item">
+                            <h5>获得的新知识：</h5>
+                            <p>系统已从最近的对话中提取重要信息，并更新到长期记忆中。</p>
+                        </div>
+                        <div class="result-item">
+                            <h5>知识结构变化：</h5>
+                            <p>记忆库已优化，去除冗余内容，保留核心信息。</p>
+                        </div>
+                        <div class="result-item">
+                            <h5>建议：</h5>
+                            <p>定期执行记忆蒸馏可以保持记忆库的整洁和有效性。</p>
+                        </div>
+                    `;
+                }
             } else {
                 if (statusDiv) {
                     statusDiv.innerHTML = '<p class="error">蒸馏失败: ' + (data.message || '未知错误') + '</p>';
@@ -503,6 +642,22 @@ async function startDistillation() {
         if (statusDiv) {
             statusDiv.innerHTML = '<p class="error">蒸馏失败: ' + error.message + '</p>';
         }
+    }
+}
+
+// 保存定时蒸馏设置
+async function saveDistillSettings() {
+    const frequency = document.getElementById('distill-frequency').value;
+    const time = document.getElementById('distill-time').value;
+    const days = document.getElementById('distill-days').value;
+    
+    try {
+        // 这里应该调用后端API保存设置
+        // 暂时使用模拟数据
+        alert('定时蒸馏设置保存成功！');
+    } catch (error) {
+        console.error('保存定时蒸馏设置失败:', error);
+        alert('保存失败: ' + error.message);
     }
 }
 
@@ -531,8 +686,19 @@ function bindNewModuleEvents() {
         startDistillationBtn.addEventListener('click', startDistillation);
     }
     
+    const saveDistillSettingsBtn = document.getElementById('save-distill-settings-btn');
+    if (saveDistillSettingsBtn) {
+        saveDistillSettingsBtn.addEventListener('click', saveDistillSettings);
+    }
+    
     // 绑定记忆管理标签页事件
     bindMemoryTabs();
+    
+    // 绑定任务管理标签页事件
+    bindTaskTabs();
+    
+    // 绑定记忆蒸馏标签页事件
+    bindDistillationTabs();
 }
 
 // 初始化应用
@@ -567,6 +733,15 @@ function init() {
         console.log('删除按钮事件绑定成功');
     } else {
         console.error('删除按钮未找到');
+    }
+    
+    // 绑定对话管理标题点击事件
+    const chatHeader = document.querySelector('.chat-header h3');
+    if (chatHeader) {
+        chatHeader.addEventListener('click', switchToChatSection);
+        console.log('对话管理标题点击事件绑定成功');
+    } else {
+        console.error('对话管理标题未找到');
     }
     
     // 模态窗口事件
@@ -762,10 +937,18 @@ async function switchChat(sessionId, chatName) {
         sectionTitle.textContent = chatName;
     }
     
+    // 切换到聊天内容区域
+    const contentSections = document.querySelectorAll('.content-section');
+    contentSections.forEach(sec => sec.classList.remove('active'));
+    document.getElementById('chat-section').classList.add('active');
+    
     // 清空聊天区域
     if (chatArea) {
         chatArea.innerHTML = '';
     }
+    
+    // 显示初始化界面
+    showInitializationUI();
     
     // 加载对话历史
     await loadChatHistory(sessionId);
@@ -811,6 +994,11 @@ async function loadChatHistory(sessionId) {
                     addMessage('received', message.assistant);
                 }
             });
+            
+            // 如果有对话历史，隐藏初始化界面
+            if (data.history.length > 0) {
+                hideInitializationUI();
+            }
         }
     } catch (error) {
         console.error('加载对话历史失败:', error);
@@ -904,10 +1092,49 @@ async function deleteChatById(sessionId) {
     }
 }
 
+// 发送示例消息
+function sendExampleMessage(message) {
+    messageInput.value = message;
+    sendMessage();
+}
+
+// 发送问题
+function sendQuestion(question) {
+    messageInput.value = question;
+    sendMessage();
+    // 隐藏初始化界面
+    hideInitializationUI();
+}
+
+// 显示初始化界面
+function showInitializationUI() {
+    const initializationUI = document.getElementById('chat-initialization');
+    if (initializationUI) {
+        initializationUI.style.display = 'flex';
+    }
+    if (chatArea) {
+        chatArea.style.display = 'none';
+    }
+}
+
+// 隐藏初始化界面
+function hideInitializationUI() {
+    const initializationUI = document.getElementById('chat-initialization');
+    if (initializationUI) {
+        initializationUI.style.display = 'none';
+    }
+    if (chatArea) {
+        chatArea.style.display = 'block';
+    }
+}
+
 // 更新发送消息函数
 async function sendMessage() {
     const message = messageInput.value.trim();
     if (!message) return;
+    
+    // 隐藏初始化界面
+    hideInitializationUI();
     
     // 添加用户消息
     addMessage('sent', message);

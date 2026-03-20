@@ -39,10 +39,6 @@
                         <span class="nav-icon">🧠</span>
                         <span class="nav-text">记忆管理</span>
                     </li>
-                    <li class="nav-item" data-section="scheduler">
-                        <span class="nav-icon">⏰</span>
-                        <span class="nav-text">定时任务</span>
-                    </li>
                     <li class="nav-item" data-section="distillation">
                         <span class="nav-icon">🔥</span>
                         <span class="nav-text">记忆蒸馏</span>
@@ -73,9 +69,28 @@
                 <!-- 聊天区域 -->
                 <section id="chat-section" class="content-section active">
                     <div class="chat-area" id="chat-area">
-                        <div class="message received">
-                            <div class="avatar">🌟</div>
-                            <div class="bubble">你好呀！有什么我可以帮你的吗？</div>
+                        <!-- 初始界面将通过JavaScript动态添加 -->
+                    </div>
+                    
+                    <!-- 新对话初始化界面 -->
+                    <div class="chat-initialization" id="chat-initialization" style="display: none;">
+                        <div class="initialization-content">
+                            <div class="initialization-icon">☀️</div>
+                            <div class="initialization-text">我是悦悦☀，你的智能家庭管家</div>
+                            <div class="initialization-questions">
+                                <div class="question-item" onclick="sendQuestion('今天天气怎么样')">今天天气怎么样</div>
+                                <div class="question-item" onclick="sendQuestion('你知道怎么做西红柿炒鸡蛋吗')">你知道怎么做西红柿炒鸡蛋吗</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="agent-capabilities">
+                        <h4>Agent能力示例</h4>
+                        <div class="capability-examples">
+                            <button class="example-btn" onclick="sendExampleMessage('帮我创建一个明天早上8点的提醒')">创建提醒</button>
+                            <button class="example-btn" onclick="sendExampleMessage('客厅灯开着吗？')">设备状态查询</button>
+                            <button class="example-btn" onclick="sendExampleMessage('执行记忆蒸馏')">记忆蒸馏</button>
+                            <button class="example-btn" onclick="sendExampleMessage('帮我规划一下今天的日程')">任务规划</button>
                         </div>
                     </div>
                     
@@ -107,12 +122,30 @@
                 <section id="task-section" class="content-section">
                     <div class="task-panel" id="task-panel">
                         <h3>任务管理</h3>
-                        <div class="task-controls">
-                            <input type="text" id="task-input" placeholder="输入任务内容，如：明天早上8点提醒我开会" />
-                            <button class="task-btn" id="create-task-btn">创建任务</button>
+                        <div class="task-tabs">
+                            <button class="tab-btn active" data-tab="regular">普通任务</button>
+                            <button class="tab-btn" data-tab="scheduled">定时任务</button>
                         </div>
-                        <div class="task-list" id="task-list">
-                            <!-- 任务列表将动态生成 -->
+                        <div class="tab-content">
+                            <div id="regular-tab" class="tab-pane active">
+                                <div class="task-controls">
+                                    <input type="text" id="task-input" placeholder="输入任务内容，如：明天早上8点提醒我开会" />
+                                    <button class="task-btn" id="create-task-btn">创建任务</button>
+                                </div>
+                                <div class="task-list" id="task-list">
+                                    <!-- 任务列表将动态生成 -->
+                                </div>
+                            </div>
+                            <div id="scheduled-tab" class="tab-pane">
+                                <div class="scheduler-controls">
+                                    <input type="text" id="schedule-task-input" placeholder="输入任务内容" />
+                                    <input type="datetime-local" id="schedule-time-input" />
+                                    <button class="save-btn" id="create-schedule-btn">创建定时任务</button>
+                                </div>
+                                <div class="schedule-list" id="schedule-list">
+                                    <!-- 定时任务列表将动态生成 -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -138,29 +171,49 @@
                     </div>
                 </section>
                 
-                <!-- 定时任务区域 -->
-                <section id="scheduler-section" class="content-section">
-                    <div class="scheduler-panel">
-                        <h3>定时任务</h3>
-                        <div class="task-form">
-                            <input type="text" id="schedule-task-input" placeholder="输入任务内容" />
-                            <input type="datetime-local" id="schedule-time-input" />
-                            <button class="save-btn" id="create-schedule-btn">创建任务</button>
-                        </div>
-                        <div class="schedule-list" id="schedule-list">
-                            <!-- 定时任务列表将动态生成 -->
-                        </div>
-                    </div>
-                </section>
+
                 
                 <!-- 记忆蒸馏区域 -->
                 <section id="distillation-section" class="content-section">
                     <div class="distillation-panel">
                         <h3>记忆蒸馏</h3>
                         <p>记忆蒸馏可以帮助整理和优化你的记忆，提取重要信息并去除冗余内容。</p>
-                        <button class="distill-btn" id="start-distillation-btn">开始蒸馏</button>
-                        <div class="distillation-status" id="distillation-status">
-                            <!-- 蒸馏状态将动态更新 -->
+                        <div class="distillation-tabs">
+                            <button class="tab-btn active" data-tab="manual">手动蒸馏</button>
+                            <button class="tab-btn" data-tab="scheduled">定时蒸馏</button>
+                        </div>
+                        <div class="tab-content">
+                            <div id="manual-tab" class="tab-pane active">
+                                <button class="distill-btn" id="start-distillation-btn">开始蒸馏</button>
+                                <div class="distillation-status" id="distillation-status">
+                                    <!-- 蒸馏状态将动态更新 -->
+                                </div>
+                                <div class="distillation-result" id="distillation-result">
+                                    <!-- 蒸馏结果将动态更新 -->
+                                </div>
+                            </div>
+                            <div id="scheduled-tab" class="tab-pane">
+                                <div class="scheduled-distillation-settings">
+                                    <h4>定时蒸馏设置</h4>
+                                    <div class="setting-item">
+                                        <label for="distill-frequency">蒸馏频率:</label>
+                                        <select id="distill-frequency">
+                                            <option value="daily">每天</option>
+                                            <option value="weekly">每周</option>
+                                            <option value="monthly">每月</option>
+                                        </select>
+                                    </div>
+                                    <div class="setting-item">
+                                        <label for="distill-time">执行时间:</label>
+                                        <input type="time" id="distill-time" value="00:00">
+                                    </div>
+                                    <div class="setting-item">
+                                        <label for="distill-days">处理天数:</label>
+                                        <input type="number" id="distill-days" value="7" min="1" max="30">
+                                    </div>
+                                    <button class="save-btn" id="save-distill-settings-btn">保存设置</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>

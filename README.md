@@ -168,6 +168,9 @@ Home-AI-Agent/
 │   └── tools/          # 工具相关代码
 ├── config/             # 配置文件目录
 ├── data/               # 数据存储
+│   └── conversations/   # 对话存储
+│       ├── chats.json   # 对话注册表
+│       └── sessions/    # 会话文件
 ├── docs/               # 文档目录
 ├── examples/           # 示例代码目录
 ├── YUEYUE/             # 智能体人格定义
