@@ -1,13 +1,15 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Dict, Optional
 import asyncio
-from datetime import datetime
 import time
 import os
+import json
+
+from src.tools.datetime_utils import format_local_datetime
 
 class APIGateway:
     """API网关 - 提供RESTful API服务"""
@@ -22,12 +24,24 @@ class APIGateway:
     
     def _initialize_dependencies(self):
         """初始化依赖"""
-        from src.agents.agent_cluster import AgentCluster
         from src.agent.independent_session_manager import IndependentSessionManager
-        from src.scheduler.task_scheduler import TaskScheduler
-        self.agent_cluster = AgentCluster()
         self.session_manager = IndependentSessionManager()
-        self.task_scheduler = TaskScheduler()
+        
+        # 初始化搜索相关依赖
+        from src.skills.search_skills.web_search import WebSearchSkill
+        from src.skills.search_skills.search_judgment import SearchJudgment
+        from src.skills.search_skills.search_integration import SearchIntegration
+        from src.ai.qiniu_llm import QiniuLLM
+        import os
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        self.api_key = os.getenv('QINIU_AI_API_KEY', os.getenv('QINIU_ACCESS_KEY'))
+        
+        self.web_search = WebSearchSkill(self.api_key)
+        self.search_judgment = SearchJudgment()
+        self.search_integration = SearchIntegration(self.api_key)
+        self.llm = QiniuLLM()
     
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -62,6 +76,27 @@ class APIGateway:
             
             print(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s")
             return response
+        
+        # 错误处理中间件
+        @self.app.middleware("http")
+        async def error_handler(request: Request, call_next):
+            try:
+                response = await call_next(request)
+                return response
+            except Exception as e:
+                error_message = str(e)
+                print(f"[错误处理] 未捕获异常: {error_message}")
+                
+                # 返回统一格式的错误响应
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "success": False,
+                        "error_code": "INTERNAL_SERVER_ERROR",
+                        "error_message": "服务器内部错误，请稍后重试",
+                        "details": error_message if os.getenv("DEBUG", "False").lower() == "true" else ""
+                    }
+                )
     
     def _setup_routes(self):
         """设置路由"""
@@ -76,11 +111,13 @@ class APIGateway:
                 return {"message": "智能家居智能体API", "version": "1.0.0"}
         
         @self.app.post("/api/chat")
-        async def chat(request: Dict):
+        async def chat(request: Request):
             """聊天接口"""
-            user_input = request.get("message", "")
-            user_id = request.get("user_id", "default_user")
-            session_id = request.get("session_id")
+            body = await request.json()
+            user_input = body.get("message", "")
+            user_id = body.get("user_id", "default_user")
+            session_id = body.get("session_id")
+            stream = body.get("stream", True)  # 默认启用流式响应
             
             # 如果没有提供session_id，创建一个新会话
             if not session_id:
@@ -88,28 +125,204 @@ class APIGateway:
                 session_id = new_chat["session_id"]
             
             # 传递用户ID和session_id作为上下文
-            context = {"user_id": user_id, "session_id": session_id}
-            result = await self.agent_cluster.execute_task(user_input, context=context)
+            context = {"user_id": user_id, "session_id": session_id, "stream": stream}
             
-            # 处理不同Agent的返回格式
-            response_data = result.get("result", {})
-            if isinstance(response_data, dict) and "message" in response_data:
-                # 如果result是一个包含message字段的字典，直接使用它
-                response = response_data
-            elif isinstance(response_data, dict) and "success" in response_data:
-                # 如果result是一个完整的响应对象，直接使用它
-                response = response_data
+            # 检查是否需要网络搜索
+            is_search_needed = self.search_judgment.is_search_needed(user_input)
+            print(f"[搜索] 用户查询: {user_input}")
+            print(f"[搜索] 是否需要搜索: {is_search_needed}")
+            
+            # 强制对日期相关查询执行搜索
+            date_related_keywords = ["今天是几号", "明天是几号", "今天星期几", "明天星期几", "今年是哪一年", "现在几点了", "几点了", "今天日期", "明天日期", "当前时间", "现在时间", "日期", "时间", "联网搜索"]
+            force_search = any(keyword in user_input for keyword in date_related_keywords)
+            
+            if is_search_needed or force_search:
+                # 执行网络搜索
+                search_type = self.search_judgment.get_search_type(user_input)
+                time_filter = self.search_judgment.get_time_filter(user_input)
+                
+                print(f"[搜索] 搜索类型: {search_type}")
+                print(f"[搜索] 时间过滤: {time_filter}")
+                print(f"[搜索] 强制搜索: {force_search}")
+                
+                # 执行搜索
+                try:
+                    search_result = self.web_search.execute(
+                        user_input,
+                        search_type=search_type,
+                        time_filter=time_filter,
+                        max_retries=3
+                    )
+                except Exception as e:
+                    error_message = f"搜索执行异常: {str(e)}"
+                    print(f"[搜索] 执行异常: {error_message}")
+                    # 即使搜索失败，也调用LLM提供回答
+                    if stream:
+                        async def generate():
+                            # 首先发送会话ID
+                            session_id_data = {"type": "session_id", "content": session_id}
+                            yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 发送搜索失败的状态
+                            error_data = {"type": "error", "content": "抱歉，搜索服务暂时不可用"}
+                            yield f"data: {json.dumps(error_data)}\n\n"
+                            # 发送正在生成回答的状态
+                            generating_data = {"type": "generating", "content": "正在生成回答..."}
+                            yield f"data: {json.dumps(generating_data)}\n\n"
+                            # 执行LLM并获取流式生成器
+                            async for chunk in self.llm.generate_text(user_input, stream=True):
+                                # 发送SSE格式的数据
+                                yield f"data: {json.dumps(chunk)}\n\n"
+                        
+                        return StreamingResponse(generate(), media_type="text/event-stream")
+                    else:
+                        # 非流式响应
+                        result = await self.llm.generate_text(user_input, stream=False)
+                        
+                        # 保存对话历史
+                        if result.get("success", False):
+                            self.session_manager.save_conversation_history(
+                                session_id,
+                                user_input,
+                                result.get("text", "")
+                            )
+                        
+                        return {
+                            "success": result.get("success", False),
+                            "response": {
+                                "message": result.get("text", ""),
+                                "search_error": {
+                                    "error_code": "EXECUTION_ERROR",
+                                    "error_message": error_message,
+                                    "friendly_message": "抱歉，搜索服务暂时不可用"
+                                }
+                            },
+                            "agent": "llm",
+                            "session_id": session_id,
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        }
+                
+                if search_result.get("success", False):
+                    # 整合搜索结果
+                    integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
+                    
+                    # 保存对话历史
+                    self.session_manager.save_conversation_history(
+                        session_id,
+                        user_input,
+                        integrated_answer
+                    )
+                    
+                    if stream:
+                        async def generate():
+                            # 首先发送会话ID
+                            session_id_data = {"type": "session_id", "content": session_id}
+                            yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 发送正在搜索的状态
+                            searching_data = {"type": "searching", "content": "正在联网搜索..."}
+                            yield f"data: {json.dumps(searching_data)}\n\n"
+                            # 发送整合后的回答
+                            answer_data = {"type": "answer", "content": integrated_answer}
+                            yield f"data: {json.dumps(answer_data)}\n\n"
+                            end_data = {"type": "stream_end"}
+                            yield f"data: {json.dumps(end_data)}\n\n"
+                        
+                        return StreamingResponse(generate(), media_type="text/event-stream")
+                    else:
+                        return {
+                            "success": True,
+                            "response": {
+                                "message": integrated_answer
+                            },
+                            "agent": "web_search",
+                            "session_id": session_id,
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        }
+                else:
+                    # 搜索失败，获取错误信息
+                    error_code = search_result.get("error_code", "SEARCH_ERROR")
+                    error_message = search_result.get("error_message", "搜索失败")
+                    friendly_message = search_result.get("message", "搜索失败")
+                    
+                    print(f"[搜索] 搜索失败: {error_code} - {error_message}")
+                    
+                    # 即使搜索失败，也调用LLM提供回答
+                    if stream:
+                        async def generate():
+                            # 首先发送会话ID
+                            session_id_data = {"type": "session_id", "content": session_id}
+                            yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 发送搜索失败的状态
+                            error_data = {"type": "error", "content": friendly_message}
+                            yield f"data: {json.dumps(error_data)}\n\n"
+                            # 发送正在生成回答的状态
+                            generating_data = {"type": "generating", "content": "正在生成回答..."}
+                            yield f"data: {json.dumps(generating_data)}\n\n"
+                            # 执行LLM并获取流式生成器
+                            async for chunk in self.llm.generate_text(user_input, stream=True):
+                                # 发送SSE格式的数据
+                                yield f"data: {json.dumps(chunk)}\n\n"
+                        
+                        return StreamingResponse(generate(), media_type="text/event-stream")
+                    else:
+                        # 非流式响应
+                        result = await self.llm.generate_text(user_input, stream=False)
+                        
+                        # 保存对话历史
+                        if result.get("success", False):
+                            self.session_manager.save_conversation_history(
+                                session_id,
+                                user_input,
+                                result.get("text", "")
+                            )
+                        
+                        return {
+                            "success": result.get("success", False),
+                            "response": {
+                                "message": result.get("text", ""),
+                                "search_error": {
+                                    "error_code": error_code,
+                                    "error_message": error_message,
+                                    "friendly_message": friendly_message
+                                }
+                            },
+                            "agent": "llm",
+                            "session_id": session_id,
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        }
             else:
-                # 否则使用默认格式
-                response = response_data
-            
-            return {
-                "success": result.get("success", False),
-                "response": response,
-                "agent": result.get("agent", "unknown"),
-                "session_id": session_id,
-                "timestamp": datetime.now().isoformat()
-            }
+                # 不需要搜索，直接调用LLM
+                if stream:
+                    async def generate():
+                        # 首先发送会话ID
+                        session_id_data = {"type": "session_id", "content": session_id}
+                        yield f"data: {json.dumps(session_id_data)}\n\n"
+                        # 执行LLM并获取流式生成器
+                        async for chunk in self.llm.generate_text(user_input, stream=True):
+                            # 发送SSE格式的数据
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                    
+                    return StreamingResponse(generate(), media_type="text/event-stream")
+                else:
+                    # 非流式响应
+                    result = await self.llm.generate_text(user_input, stream=False)
+                    
+                    # 保存对话历史
+                    if result.get("success", False):
+                        self.session_manager.save_conversation_history(
+                            session_id,
+                            user_input,
+                            result.get("text", "")
+                        )
+                    
+                    return {
+                        "success": result.get("success", False),
+                        "response": {
+                            "message": result.get("text", "")
+                        },
+                        "agent": "llm",
+                        "session_id": session_id,
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
         
         # 对话管理接口
         @self.app.get("/api/chats")
@@ -119,7 +332,7 @@ class APIGateway:
             return {
                 "success": True,
                 "chats": chats,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
             }
         
         @self.app.post("/api/chats")
@@ -132,7 +345,7 @@ class APIGateway:
             return {
                 "success": True,
                 "chat": new_chat,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
             }
         
         @self.app.get("/api/chats/{session_id}")
@@ -143,12 +356,12 @@ class APIGateway:
                 return {
                     "success": False,
                     "message": "对话不存在",
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 }
             return {
                 "success": True,
                 "chat": chat,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
             }
         
         @self.app.put("/api/chats/{session_id}")
@@ -159,7 +372,7 @@ class APIGateway:
                 return {
                     "success": False,
                     "message": "缺少对话名称",
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 }
             
             success = self.session_manager.update_session_name(session_id, name)
@@ -167,14 +380,14 @@ class APIGateway:
                 return {
                     "success": False,
                     "message": "对话不存在",
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 }
             
             chat = self.session_manager.get_session(session_id)
             return {
                 "success": True,
                 "chat": chat,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
             }
         
         @self.app.delete("/api/chats/{session_id}")
@@ -185,12 +398,12 @@ class APIGateway:
                 return {
                     "success": False,
                     "message": "对话不存在",
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 }
             return {
                 "success": True,
                 "message": "对话删除成功",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
             }
         
         @self.app.get("/api/chats/{session_id}/history")
@@ -200,66 +413,7 @@ class APIGateway:
             return {
                 "success": True,
                 "history": history,
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        @self.app.post("/api/device/control")
-        async def device_control(request: Dict):
-            """设备控制接口"""
-            device_id = request.get("device_id")
-            action = request.get("action")
-            params = request.get("params", {})
-            
-            # 只处理灯光相关的控制
-            if "灯" in device_id or "led" in device_id.lower():
-                task = f"{action} {device_id}"
-                result = await self.agent_cluster.execute_task(task)
-                return result
-            else:
-                return {"success": False, "message": "只支持灯光设备控制"}
-        
-        @self.app.get("/api/device/status/{device_id}")
-        async def get_device_status(device_id: str):
-            """获取设备状态接口"""
-            # 只处理灯光相关的状态查询
-            if "灯" in device_id or "led" in device_id.lower():
-                task = f"读取{device_id}状态"
-                result = await self.agent_cluster.execute_task(task)
-                return result
-            else:
-                return {"success": False, "message": "只支持灯光设备状态查询"}
-        
-        @self.app.post("/api/reminder/create")
-        async def create_reminder(request: Dict):
-            """创建提醒接口"""
-            task = f"创建提醒 {request.get('title', '')}"
-            result = await self.agent_cluster.execute_task(task)
-            
-            return result
-        
-        @self.app.get("/api/reminder/list/{user_id}")
-        async def get_reminders(user_id: str):
-            """获取提醒列表接口"""
-            import json
-            import os
-            
-            reminder_file = f"data/reminders/{user_id}.json"
-            if os.path.exists(reminder_file):
-                with open(reminder_file, "r", encoding="utf-8") as f:
-                    reminders = json.load(f)
-                return {"success": True, "reminders": reminders}
-            else:
-                return {"success": True, "reminders": []}
-        
-        @self.app.get("/api/agent/status")
-        async def get_agent_status():
-            """获取Agent状态接口"""
-            status = self.agent_cluster.get_agent_status()
-            
-            return {
-                "success": True,
-                "agents": status,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
             }
         
         @self.app.get("/api/health")
@@ -267,7 +421,7 @@ class APIGateway:
             """健康检查接口"""
             return {
                 "status": "healthy",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S'),
                 "services": {
                     "gateway": "ok",
                     "agents": "ok",
@@ -275,145 +429,19 @@ class APIGateway:
                     "llm": "ok"
                 }
             }
-        
-        # 记忆管理接口
-        @self.app.get("/api/memory/soul")
-        async def get_soul_file():
-            """获取人格文件"""
-            try:
-                from src.agent.memory_manager import MemoryManager
-                memory_manager = MemoryManager()
-                soul = memory_manager.read_soul()
-                if soul:
-                    return {"success": True, "data": str(soul)}
-                else:
-                    return {"success": True, "data": "{}"}
-            except Exception as e:
-                return {"success": False, "message": str(e)}
-        
-        @self.app.post("/api/memory/soul")
-        async def save_soul_file(request: Dict):
-            """保存人格文件"""
-            try:
-                content = request.get("content")
-                from src.agent.memory_manager import MemoryManager
-                memory_manager = MemoryManager()
-                # 这里需要实现保存人格文件的方法
-                # 暂时返回成功
-                return {"success": True, "message": "人格文件保存成功"}
-            except Exception as e:
-                return {"success": False, "message": str(e)}
-        
-        @self.app.get("/api/memory/long-term")
-        async def get_long_term_memory():
-            """获取长期记忆文件"""
-            try:
-                from src.agent.memory_manager import MemoryManager
-                memory_manager = MemoryManager()
-                memory = memory_manager.read_long_term_memory()
-                return {"success": True, "data": memory}
-            except Exception as e:
-                return {"success": False, "message": str(e)}
-        
-        @self.app.post("/api/memory/long-term")
-        async def save_long_term_memory(request: Dict):
-            """保存长期记忆文件"""
-            try:
-                content = request.get("content")
-                from src.agent.memory_manager import MemoryManager
-                memory_manager = MemoryManager()
-                memory_manager.write_long_term_memory(content)
-                return {"success": True, "message": "记忆文件保存成功"}
-            except Exception as e:
-                return {"success": False, "message": str(e)}
-        
-        @self.app.post("/api/memory/distill")
-        async def distill_memory(request: Dict):
-            """执行记忆蒸馏"""
-            try:
-                from src.agent.memory_manager import MemoryManager
-                memory_manager = MemoryManager()
-                days = request.get("days", 7)
-                result = memory_manager.distill_memory(days)
-                return result
-            except Exception as e:
-                return {"success": False, "message": str(e)}
-        
-        # 定时任务接口
-        @self.app.get("/api/scheduler/list")
-        async def get_schedule_list():
-            """获取定时任务列表"""
-            try:
-                tasks = self.task_scheduler.get_all_tasks()
-                schedules = []
-                for task in tasks:
-                    schedule = {
-                        "id": task["id"],
-                        "title": task.get("name", task["id"]),
-                        "time": task.get("time", task.get("cron_expr", "")),
-                        "status": "active" if task["enabled"] else "inactive"
-                    }
-                    schedules.append(schedule)
-                return {"success": True, "schedules": schedules}
-            except Exception as e:
-                return {"success": False, "message": str(e)}
-        
-        @self.app.post("/api/scheduler/create")
-        async def create_schedule(request: Dict):
-            """创建定时任务"""
-            try:
-                title = request.get("title")
-                time = request.get("time")
-                cron_expr = request.get("cron_expr")
-                command = request.get("command")
-                
-                if not title or not (time or cron_expr):
-                    return {"success": False, "message": "缺少必要参数"}
-                
-                import uuid
-                task_id = str(uuid.uuid4())
-                
-                if cron_expr:
-                    # 创建CRON任务
-                    async def task_callback():
-                        print(f"执行定时任务: {title}")
-                        return f"任务 {title} 执行成功"
-                    
-                    await self.task_scheduler.schedule_cron_task(task_id, cron_expr, task_callback)
-                elif time:
-                    # 创建每日任务
-                    async def task_callback():
-                        print(f"执行定时任务: {title}")
-                        return f"任务 {title} 执行成功"
-                    
-                    await self.task_scheduler.schedule_daily_task(task_id, time, task_callback)
-                
-                if command:
-                    # 创建Windows计划任务
-                    result = await self.task_scheduler.create_windows_task(title, cron_expr or "0 0 * * *", command)
-                    if not result["success"]:
-                        return result
-                
-                return {"success": True, "message": "定时任务创建成功", "task_id": task_id}
-            except Exception as e:
-                return {"success": False, "message": str(e)}
-        
-        @self.app.delete("/api/scheduler/{schedule_id}")
-        async def delete_schedule(schedule_id: str):
-            """删除定时任务"""
-            try:
-                result = self.task_scheduler.delete_task(schedule_id)
-                return result
-            except Exception as e:
-                return {"success": False, "message": str(e)}
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         """启动API服务器"""
         import uvicorn
         import asyncio
         
-        # 启动任务调度器
-        loop = asyncio.get_event_loop()
-        loop.create_task(self.task_scheduler.start())
-        
         uvicorn.run(self.app, host=host, port=port)
+
+if __name__ == "__main__":
+    # 创建API网关实例并启动服务器
+    gateway = APIGateway()
+    gateway.run(port=8003)
+
+# 创建API网关实例并导出app变量，供uvicorn使用
+gateway = APIGateway()
+app = gateway.app

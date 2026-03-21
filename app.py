@@ -1,10 +1,16 @@
 import os
 import subprocess
 import sys
+import argparse
 from src.gateway.api_gateway import APIGateway
 
+# 解析命令行参数
+parser = argparse.ArgumentParser(description='启动智能家居智能体API服务器')
+parser.add_argument('--port', type=int, default=8005, help='服务器端口')
+args = parser.parse_args()
+
 # 检查并释放端口
-port = 8005
+port = args.port
 
 def check_and_release_port(port):
     """检查端口是否被占用，并尝试释放"""

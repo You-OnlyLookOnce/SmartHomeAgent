@@ -6,7 +6,7 @@
 
 ## 系统架构
 
-- **AI Agent集群**：设备控制Agent、AI笔记Agent、待办管理Agent、安全守护Agent
+- **AI Agent**：悦悦 (YueYue) 智能助手，集成了设备控制、任务管理、笔记管理、安全监控等功能
 - **后端服务**：API网关、负载均衡、数据库集成、定时任务系统
 - **安全模块**：认证授权、权限控制、数据加密、敏感信息检测
 - **前端界面**：晨光主题UI，温暖专业的用户界面
@@ -48,8 +48,8 @@ SECRET_KEY=your_secret_key_for_encryption
 # 启动API网关
 python app.py
 
-# 服务将在 http://localhost:8000 运行
-# 注意：启动时可能会显示 http://0.0.0.0:8000，这是服务器绑定地址，客户端访问时请使用 http://localhost:8000
+# 服务将在 http://localhost:8001 运行
+# 注意：启动时可能会显示 http://0.0.0.0:8001，这是服务器绑定地址，客户端访问时请使用 http://localhost:8001
 ```
 
 ### 4. 打开前端网页
@@ -112,16 +112,8 @@ python -m http.server 8080
 
 ## 核心功能
 
-### Agent集群
-- **DeviceControlAgent**：专门处理设备控制任务
-- **NoteKeeperAgent**：专门处理笔记和记忆管理
-- **TaskManagerAgent**：专门处理任务和提醒管理
-- **SecurityAgent**：专门处理安全监控和告警
-- **ConversationAgent**：专门处理对话和交互
-- **HallucinationDetector**：检测和处理大模型幻觉
-
 ### 智能体人格
-- **悦悦 (YueYue)**：温柔体贴的女性家庭管家
+- **悦悦 (YueYue)**：温柔体贴的女性家庭管家，集成了设备控制、任务管理、笔记管理、安全监控等功能
 - **人格特征**：温暖、关怀、善解人意（ENFJ类型）
 - **语言风格**：温暖柔和 + emoji 点缀 + 关心问候
 
@@ -141,6 +133,8 @@ python -m http.server 8080
 - **Workflow Engine**：编排和执行复杂工作流
 - **SAGE风格用户画像**：分层用户画像管理
 - **Lares风格意图/动作分离**：提高任务处理可靠性
+- **对话内容持久化**：确保对话切换时数据不丢失，所有历史对话内容完整保留
+- **思考过程优化**：减少思考过程的响应时间，提高用户体验
 
 ## 技术栈
 
@@ -200,11 +194,10 @@ Home-AI-Agent/
 
 ### 添加新设备
 1. 在 `src/skills/device_skills/` 目录创建新的设备控制技能
-2. 在 `DeviceControlAgent` 中注册新技能
-3. 测试设备控制功能
+2. 测试设备控制功能
 
 ### 添加新功能
-1. 创建新的技能或Agent
+1. 创建新的技能
 2. 在API网关中添加对应的路由
 3. 测试新功能
 

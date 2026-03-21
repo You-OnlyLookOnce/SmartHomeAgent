@@ -228,23 +228,36 @@ class QiniuLLM:
             "error": f"Maximum retries ({max_retries}) exceeded"
         }
     
-    async def generate_text(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024) -> Dict[str, Any]:
+    def generate_text(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, stream: bool = False, tools: list = None):
         """生成文本
         
         Args:
             prompt: 提示词
             context: 上下文对话历史
             max_tokens: 最大生成 token 数
+            stream: 是否启用流式响应
+            tools: 可供模型调用的工具定义列表
             
         Returns:
-            生成的文本和相关信息
+            如果stream为True，返回一个生成器，否则返回一个可等待对象
         """
+        if stream:
+            return self._generate_text_stream(prompt, context, max_tokens, tools)
+        else:
+            return self._generate_text_non_stream(prompt, context, max_tokens, tools)
+    
+    async def _generate_text_stream(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, tools: list = None):
+        """生成文本（流式响应）"""
+        # 检查API密钥
+        api_key_check = self._check_api_key()
+        if api_key_check:
+            yield {
+                "type": "error",
+                "content": api_key_check["error"]
+            }
+            return
+            
         try:
-            # 检查API密钥
-            api_key_check = self._check_api_key()
-            if api_key_check:
-                return api_key_check
-                
             logger.info(f"generate_text called with prompt: {prompt[:50]}...")
             logger.info(f"Context length: {len(context) if context else 0}")
             # 构建消息列表
@@ -253,7 +266,7 @@ class QiniuLLM:
             # 添加系统消息
             system_message = {
                 "role": "system",
-                "content": "你是悦悦，一个具有独特个性的智能助手。请根据用户的问题提供详细、有用的回答。"
+                "content": "你是悦悦，一个具有独特个性的智能助手。请根据用户的问题提供详细、有用的回答。当遇到需要实时信息或超出你知识库的问题时，请使用提供的工具进行查询。"
             }
             messages.append(system_message)
             
@@ -275,9 +288,70 @@ class QiniuLLM:
             
             # 调用API
             logger.info(f"Calling chat_completion with {len(messages)} messages")
-            result = await self.chat_completion(messages, max_tokens)
-            logger.info(f"chat_completion returned: {result}")
-            return result
+            async for chunk in self.chat_completion(messages, max_tokens, stream=True, tools=tools):
+                yield chunk
+            
+        except Exception as e:
+            logger.error(f"Exception in generate_text: {e}")
+            yield {
+                "type": "error",
+                "content": str(e)
+            }
+    
+    async def _generate_text_non_stream(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, tools: list = None):
+        """生成文本（非流式响应）"""
+        try:
+            # 检查API密钥
+            api_key_check = self._check_api_key()
+            if api_key_check:
+                return api_key_check
+                
+            logger.info(f"generate_text called with prompt: {prompt[:50]}...")
+            logger.info(f"Context length: {len(context) if context else 0}")
+            # 构建消息列表
+            messages = []
+            
+            # 添加系统消息
+            system_message = {
+                "role": "system",
+                "content": "你是悦悦，一个具有独特个性的智能助手。请根据用户的问题提供详细、有用的回答。当遇到需要实时信息或超出你知识库的问题时，请使用提供的工具进行查询。"
+            }
+            messages.append(system_message)
+            
+            # 添加上下文消息
+            if context:
+                for msg in context:
+                    if "user" in msg:
+                        messages.append({"role": "user", "content": msg["user"]})
+                    elif "assistant" in msg:
+                        messages.append({"role": "assistant", "content": msg["assistant"]})
+                    elif "system" in msg:
+                        messages.append({"role": "system", "content": msg["system"]})
+                    elif "summary" in msg:
+                        # 处理摘要信息
+                        messages.append({"role": "system", "content": f"对话摘要：{msg['summary']}"})
+            
+            # 添加用户当前问题
+            messages.append({"role": "user", "content": prompt})
+            
+            # 调用API
+            logger.info(f"Calling chat_completion with {len(messages)} messages")
+            # 非流式响应时，收集所有chunk并返回完整响应
+            full_response = ""
+            async for chunk in self.chat_completion(messages, max_tokens, stream=True, tools=tools):
+                if chunk.get("type") == "answer" and "content" in chunk:
+                    full_response += chunk["content"]
+            
+            if full_response:
+                return {
+                    "success": True,
+                    "text": full_response
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "No response from model"
+                }
             
         except Exception as e:
             logger.error(f"Exception in generate_text: {e}")
@@ -286,7 +360,7 @@ class QiniuLLM:
                 "error": str(e)
             }
     
-    async def chat_completion(self, messages: list, max_tokens: int = 1024, stream: bool = False, tools: list = None, tool_choice: str = "auto") -> Dict[str, Any]:
+    def chat_completion(self, messages: list, max_tokens: int = 1024, stream: bool = False, tools: list = None, tool_choice: str = "auto"):
         """聊天完成
         
         Args:
@@ -299,12 +373,154 @@ class QiniuLLM:
         Returns:
             生成的文本和相关信息
         """
+        if stream:
+            return self._chat_completion_stream(messages, max_tokens, tools, tool_choice)
+        else:
+            return self._chat_completion_non_stream(messages, max_tokens, tools, tool_choice)
+    
+    async def _chat_completion_stream(self, messages: list, max_tokens: int = 1024, tools: list = None, tool_choice: str = "auto"):
+        """聊天完成（流式响应）"""
         print("chat_completion called")
         print(f"API URL: {self.api_url}")
         print(f"Model: {self.model}")
         print(f"API Key: {'***' if self.api_key else 'Not configured'}")
         print(f"API Key length: {len(self.api_key) if self.api_key else 0}")
-        print(f"Stream: {stream}, Tools: {tools}, Tool choice: {tool_choice}")
+        print(f"Stream: True, Tools: {tools}, Tool choice: {tool_choice}")
+        
+        # 检查API密钥
+        api_key_check = self._check_api_key()
+        if api_key_check:
+            yield {
+                "type": "error",
+                "content": api_key_check["error"]
+            }
+            return
+        
+        try:
+            # 七牛云 AI API 使用 Bearer Token 认证
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": self.temperature,
+                "top_p": 0.95,
+                "stream": True
+            }
+            
+            # 添加工具调用参数
+            if tools:
+                payload["tools"] = tools
+                payload["tool_choice"] = tool_choice
+            
+            logger.info(f"Sending API request to: {self.api_url}")
+            logger.info(f"Messages count: {len(messages)}")
+            logger.info(f"First message: {json.dumps(messages[0], ensure_ascii=False) if messages else 'None'}")
+            # 不打印完整headers，避免暴露敏感信息
+            logger.info("Headers: Content-Type and Authorization set")
+            
+            # 流式响应需要特殊处理，不使用通用API请求方法
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.api_url, headers=headers, json=payload) as response:
+                    logger.info(f"Response status: {response.status}")
+                    # 不打印完整headers，避免暴露敏感信息
+                    logger.info("Response headers received")
+                    
+                    try:
+                        # 实时处理流式响应
+                        buffer = b''
+                        has_content = False
+                        async for chunk in response.content:
+                            if chunk:
+                                buffer += chunk
+                                # 处理SSE格式的数据
+                                lines = buffer.split(b'\n')
+                                buffer = lines.pop()  # 保留不完整的最后一行
+                                
+                                for line in lines:
+                                    line = line.strip()
+                                    if line.startswith(b'data: '):
+                                        data_str = line[6:].decode('utf-8')
+                                        if data_str == '[DONE]':
+                                            continue
+                                        if data_str:
+                                            try:
+                                                data = json.loads(data_str)
+                                                if "error" in data:
+                                                    # 处理API错误
+                                                    error_message = data["error"].get("message", "API error")
+                                                    yield {
+                                                        "type": "error",
+                                                        "content": f"API错误: {error_message}"
+                                                    }
+                                                elif "choices" in data and len(data["choices"]) > 0:
+                                                    choice = data["choices"][0]
+                                                    if "delta" in choice:
+                                                        delta = choice["delta"]
+                                                        if "content" in delta:
+                                                            content = delta["content"]
+                                                            has_content = True
+                                                            # 实时返回流式数据
+                                                            yield {
+                                                                "type": "answer",
+                                                                "content": content
+                                                            }
+                                                        elif "tool_calls" in delta:
+                                                            # 处理工具调用
+                                                            tool_calls = delta["tool_calls"]
+                                                            has_content = True
+                                                            yield {
+                                                                "type": "tool_call",
+                                                                "tool_calls": tool_calls
+                                                            }
+                                            except Exception as e:
+                                                logger.error(f"Failed to parse SSE data: {e}")
+                                                # 打印失败的数据，以便调试
+                                                logger.error(f"Failed data: {data_str}")
+                                                yield {
+                                                    "type": "error",
+                                                    "content": f"解析响应数据失败: {str(e)}"
+                                                }
+                        
+                        # 流式响应结束
+                        # 无论buffer是否为空，都正常结束流式响应
+                        # 因为即使buffer不为空，也可能是正常的响应结束
+                        # 如果没有收到任何内容，返回一个错误消息
+                        if not has_content:
+                            yield {
+                                "type": "error",
+                                "content": "API调用失败，未收到任何响应"
+                            }
+                        yield {
+                            "type": "stream_end"
+                        }
+                    except Exception as e:
+                        logger.error(f"Failed to process stream response: {e}")
+                        yield {
+                            "type": "error",
+                            "content": f"处理响应流失败: {str(e)}"
+                        }
+        except Exception as e:
+            logger.error(f"Exception during API call: {e}")
+            import traceback
+            traceback.print_exc()
+            yield {
+                "type": "error",
+                "content": f"API调用失败: {str(e)}"
+            }
+    
+    async def _chat_completion_non_stream(self, messages: list, max_tokens: int = 1024, tools: list = None, tool_choice: str = "auto"):
+        """聊天完成（非流式响应）"""
+        print("chat_completion called")
+        print(f"API URL: {self.api_url}")
+        print(f"Model: {self.model}")
+        print(f"API Key: {'***' if self.api_key else 'Not configured'}")
+        print(f"API Key length: {len(self.api_key) if self.api_key else 0}")
+        print(f"Stream: False, Tools: {tools}, Tool choice: {tool_choice}")
         
         # 检查API密钥
         api_key_check = self._check_api_key()
@@ -324,7 +540,7 @@ class QiniuLLM:
                 "max_tokens": max_tokens,
                 "temperature": self.temperature,
                 "top_p": 0.95,
-                "stream": stream
+                "stream": False
             }
             
             # 添加工具调用参数
@@ -337,87 +553,37 @@ class QiniuLLM:
             print(f"First message: {json.dumps(messages[0], ensure_ascii=False) if messages else 'None'}")
             print(f"Headers: {headers}")
             
-            # 处理流式响应
-            if stream:
-                # 流式响应需要特殊处理，不使用通用API请求方法
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(self.api_url, headers=headers, json=payload) as response:
-                        print(f"Response status: {response.status}")
-                        print(f"Response headers: {dict(response.headers)}")
-                        
-                        try:
-                            # 处理流式响应
-                            chunks = []
-                            async for chunk in response.content:
-                                if chunk:
-                                    chunks.append(chunk)
-                            
-                            # 合并所有chunk并解析
-                            response_data = b''.join(chunks)
-                            data = json.loads(response_data)
-                            print(f"Stream response data: {json.dumps(data, ensure_ascii=False)}")
-                        except Exception as e:
-                            print(f"Failed to parse response JSON: {e}")
-                            return {
-                                "success": False,
-                                "error": f"Failed to parse response: {e}"
-                            }
-                        
-                        if "choices" in data and len(data["choices"]) > 0:
-                            text = data["choices"][0]["message"]["content"]
-                            usage = data.get("usage", {})
-                            tool_calls = data["choices"][0]["message"].get("tool_calls", None)
-                            print(f"Generated text: {text[:100]}...")
-                            
-                            result = {
-                                "success": True,
-                                "text": text,
-                                "usage": usage
-                            }
-                            
-                            if tool_calls:
-                                result["tool_calls"] = tool_calls
-                            
-                            return result
-                        else:
-                            print("No choices in response")
-                            return {
-                                "success": False,
-                                "error": "No response from model"
-                            }
-            else:
-                # 非流式响应使用通用API请求方法
-                response = await self._api_request("POST", self.api_url, headers=headers, data=payload)
-                
-                if response["success"]:
-                    data = response["data"]
-                    print(f"Response data: {json.dumps(data, ensure_ascii=False)}")
-                    
-                    if "choices" in data and len(data["choices"]) > 0:
-                        text = data["choices"][0]["message"]["content"]
-                        usage = data.get("usage", {})
-                        tool_calls = data["choices"][0]["message"].get("tool_calls", None)
-                        print(f"Generated text: {text[:100]}...")
-                        
-                        result = {
-                            "success": True,
-                            "text": text,
-                            "usage": usage
-                        }
-                        
-                        if tool_calls:
-                            result["tool_calls"] = tool_calls
-                        
-                        return result
-                    else:
-                        print("No choices in response")
-                        return {
-                            "success": False,
-                            "error": "No response from model"
-                        }
-                else:
-                    return response
+            # 非流式响应使用通用API请求方法
+            response = await self._api_request("POST", self.api_url, headers=headers, data=payload)
             
+            if response["success"]:
+                data = response["data"]
+                print(f"Response data: {json.dumps(data, ensure_ascii=False)}")
+                
+                if "choices" in data and len(data["choices"]) > 0:
+                    text = data["choices"][0]["message"]["content"]
+                    usage = data.get("usage", {})
+                    tool_calls = data["choices"][0]["message"].get("tool_calls", None)
+                    print(f"Generated text: {text[:100]}...")
+                    
+                    result = {
+                        "success": True,
+                        "text": text,
+                        "usage": usage
+                    }
+                    
+                    if tool_calls:
+                        result["tool_calls"] = tool_calls
+                    
+                    return result
+                else:
+                    print("No choices in response")
+                    return {
+                        "success": False,
+                        "error": "No response from model"
+                    }
+            else:
+                return response
         except Exception as e:
             print(f"Exception during API call: {e}")
             import traceback
@@ -427,384 +593,4 @@ class QiniuLLM:
                 "error": str(e)
             }
     
-    async def web_search(self, query: str, max_results: int = 20, search_type: str = "web", time_filter: str = None, site_filter: list = None) -> Dict[str, Any]:
-        """全网搜索
-        
-        Args:
-            query: 搜索关键词或查询语句
-            max_results: 返回结果数量，网页搜索默认20，最大50，视频最大10（默认5），图片搜索最大30（默认15）
-            search_type: 搜索类型，默认"web"（网页搜索）
-            time_filter: 时间过滤，可选值：week（一周内）、month（一月内）、year（一年内）、semiyear(半年内)
-            site_filter: 站点过滤，指定搜索特定网站的内容（最多20个）
-            
-        Returns:
-            搜索结果和相关信息
-        """
-        try:
-            # 检查API密钥
-            api_key_check = self._check_api_key()
-            if api_key_check:
-                return api_key_check
-                
-            logger.info(f"web_search called with query: {query}")
-            logger.info(f"max_results: {max_results}, search_type: {search_type}")
-            logger.info(f"time_filter: {time_filter}, site_filter: {site_filter}")
-            
-            # 七牛云 AI API 使用 Bearer Token 认证
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            # 构建请求参数
-            payload = {
-                "query": query,
-                "max_results": max_results,
-                "search_type": search_type
-            }
-            
-            # 添加可选参数
-            if time_filter:
-                payload["time_filter"] = time_filter
-            if site_filter:
-                payload["site_filter"] = site_filter
-            
-            # 全网搜索 API 接入点
-            search_api_url = "https://api.qnaigc.com/v1/search"
-            
-            logger.info(f"Sending search API request to: {search_api_url}")
-            logger.info(f"Payload: {json.dumps(payload, ensure_ascii=False)}")
-            
-            # 使用通用API请求方法
-            response = await self._api_request("POST", search_api_url, headers=headers, data=payload)
-            
-            if response["success"]:
-                data = response["data"]
-                logger.info(f"Response data: {json.dumps(data, ensure_ascii=False)}")
-                
-                if "success" in data and data["success"]:
-                    return {
-                        "success": True,
-                        "data": data["data"]
-                    }
-                else:
-                    error_message = data.get("message", "Search failed")
-                    logger.error(f"Search failed: {error_message}")
-                    return {
-                        "success": False,
-                        "error": error_message
-                    }
-            else:
-                return response
-            
-        except Exception as e:
-            logger.error(f"Exception during web search: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def real_time_inference(self, input_data: Dict[str, Any], model: str = None) -> Dict[str, Any]:
-        """实时推理
-        
-        Args:
-            input_data: 输入数据，支持文本、图像或文件
-            model: 使用的模型名称，默认使用类初始化时的模型
-            
-        Returns:
-            推理结果和相关信息
-        """
-        try:
-            # 检查API密钥
-            api_key_check = self._check_api_key()
-            if api_key_check:
-                return api_key_check
-                
-            logger.info(f"real_time_inference called with input type: {list(input_data.keys())}")
-            
-            # 七牛云 AI API 使用 Bearer Token 认证
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            # 使用指定的模型或默认模型
-            target_model = model or self.model
-            
-            # 构建请求参数
-            payload = {
-                "model": target_model
-            }
-            
-            # 处理不同类型的输入
-            if "text" in input_data:
-                # 文本输入
-                messages = [
-                    {
-                        "role": "user",
-                        "content": input_data["text"]
-                    }
-                ]
-                payload["messages"] = messages
-            elif "image_url" in input_data:
-                # 图像输入（图片文字识别）
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "识别图片中的内容"
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": input_data["image_url"]
-                                }
-                            }
-                        ]
-                    }
-                ]
-                payload["messages"] = messages
-            elif "file_url" in input_data and "file_type" in input_data:
-                # 文件识别
-                messages = [
-                    {
-                        "role": "user",
-                        "content": f"识别 {input_data['file_type']} 文件中的内容"
-                    }
-                ]
-                payload["messages"] = messages
-                payload["file"] = {
-                    "type": input_data["file_type"],
-                    "url": input_data["file_url"]
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": "Invalid input data. Please provide 'text', 'image_url', or 'file_url' and 'file_type'."
-                }
-            
-            # 实时推理 API 接入点（与聊天补全相同）
-            inference_api_url = "https://api.qnaigc.com/v1/chat/completions"
-            
-            logger.info(f"Sending inference API request to: {inference_api_url}")
-            logger.info(f"Model: {target_model}")
-            logger.info(f"Payload: {json.dumps(payload, ensure_ascii=False)}")
-            
-            # 使用通用API请求方法
-            response = await self._api_request("POST", inference_api_url, headers=headers, data=payload)
-            
-            if response["success"]:
-                data = response["data"]
-                logger.info(f"Response data: {json.dumps(data, ensure_ascii=False)}")
-                
-                if "choices" in data and len(data["choices"]) > 0:
-                    text = data["choices"][0]["message"]["content"]
-                    usage = data.get("usage", {})
-                    logger.info(f"Inference result: {text[:100]}...")
-                    return {
-                        "success": True,
-                        "text": text,
-                        "usage": usage
-                    }
-                else:
-                    logger.error("No choices in response")
-                    return {
-                        "success": False,
-                        "error": "No response from model"
-                    }
-            else:
-                return response
-            
-        except Exception as e:
-            logger.error(f"Exception during real time inference: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def create_batch_inference_task(self, name: str, model: str, input_files_url: str, description: str = None) -> Dict[str, Any]:
-        """创建批量推理任务
-        
-        Args:
-            name: 任务名称
-            model: 使用的模型名称，目前支持 deepseek-v3、deepseek-r1、deepseek-r1-32b
-            input_files_url: 输入文件的URL地址
-            description: 任务描述
-            
-        Returns:
-            任务创建结果和任务ID
-        """
-        try:
-            # 检查API密钥
-            api_key_check = self._check_api_key()
-            if api_key_check:
-                return api_key_check
-                
-            logger.info(f"create_batch_inference_task called with name: {name}, model: {model}")
-            logger.info(f"input_files_url: {input_files_url}, description: {description}")
-            
-            # 七牛云 AI API 使用 Bearer Token 认证
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            # 构建请求参数
-            payload = {
-                "name": name,
-                "model": model,
-                "input_files_url": input_files_url
-            }
-            
-            # 添加可选参数
-            if description:
-                payload["description"] = description
-            
-            # 批量推理 API 接入点
-            batch_api_url = "https://api.qnaigc.com/v1/batchjob/inference"
-            
-            logger.info(f"Sending batch inference task creation request to: {batch_api_url}")
-            logger.info(f"Payload: {json.dumps(payload, ensure_ascii=False)}")
-            
-            # 使用通用API请求方法
-            response = await self._api_request("POST", batch_api_url, headers=headers, data=payload)
-            
-            if response["success"]:
-                data = response["data"]
-                logger.info(f"Response data: {json.dumps(data, ensure_ascii=False)}")
-                
-                if "id" in data:
-                    return {
-                        "success": True,
-                        "task_id": data["id"]
-                    }
-                else:
-                    logger.error("No task ID in response")
-                    return {
-                        "success": False,
-                        "error": "No task ID returned"
-                    }
-            else:
-                return response
-            
-        except Exception as e:
-            logger.error(f"Exception during batch inference task creation: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def get_batch_inference_task(self, task_id: str) -> Dict[str, Any]:
-        """查询批量推理任务状态
-        
-        Args:
-            task_id: 批量任务ID
-            
-        Returns:
-            任务状态和详细信息
-        """
-        try:
-            # 检查API密钥
-            api_key_check = self._check_api_key()
-            if api_key_check:
-                return api_key_check
-                
-            logger.info(f"get_batch_inference_task called with task_id: {task_id}")
-            
-            # 七牛云 AI API 使用 Bearer Token 认证
-            headers = {
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            # 批量推理 API 接入点
-            batch_api_url = f"https://api.qnaigc.com/v1/batchjob/inference/{task_id}"
-            
-            logger.info(f"Sending batch inference task query request to: {batch_api_url}")
-            
-            # 使用通用API请求方法
-            response = await self._api_request("GET", batch_api_url, headers=headers)
-            
-            if response["success"]:
-                data = response["data"]
-                logger.info(f"Response data: {json.dumps(data, ensure_ascii=False)}")
-                
-                return {
-                    "success": True,
-                    "data": data
-                }
-            else:
-                return response
-            
-        except Exception as e:
-            logger.error(f"Exception during batch inference task query: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def list_batch_inference_tasks(self, page: int = 1, page_size: int = 100) -> Dict[str, Any]:
-        """列出批量推理任务
-        
-        Args:
-            page: 页码，默认1
-            page_size: 每页记录数，默认100
-            
-        Returns:
-            任务列表
-        """
-        try:
-            # 检查API密钥
-            api_key_check = self._check_api_key()
-            if api_key_check:
-                return api_key_check
-                
-            logger.info(f"list_batch_inference_tasks called with page: {page}, page_size: {page_size}")
-            
-            # 七牛云 AI API 使用 Bearer Token 认证
-            headers = {
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            # 构建查询参数
-            params = {
-                "page": page,
-                "page_size": page_size
-            }
-            
-            # 批量推理 API 接入点
-            batch_api_url = "https://api.qnaigc.com/v1/batchjob/inferences"
-            
-            logger.info(f"Sending batch inference tasks list request to: {batch_api_url}")
-            
-            # 使用通用API请求方法
-            response = await self._api_request("GET", batch_api_url, headers=headers, params=params)
-            
-            if response["success"]:
-                data = response["data"]
-                logger.info(f"Response data: {json.dumps(data, ensure_ascii=False)}")
-                
-                return {
-                    "success": True,
-                    "data": data
-                }
-            else:
-                return response
-            
-        except Exception as e:
-            logger.error(f"Exception during batch inference tasks list: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "success": False,
-                "error": str(e)
-            }
+

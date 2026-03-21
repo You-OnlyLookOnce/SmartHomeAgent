@@ -22,6 +22,11 @@ const confirmCreateBtn = document.getElementById('confirm-create-btn');
 
 // 当前会话ID
 let currentSessionId = null;
+// 窗口唯一标识符，用于在本地存储中区分不同窗口的会话状态
+const windowId = 'window_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+// 是否正在进行流式响应
+let isStreaming = false;
+console.log('窗口唯一标识符:', windowId);
 
 // 初始化函数将在后面定义
 
@@ -34,6 +39,12 @@ function bindSidebarNavigation() {
     navItems.forEach(item => {
         item.addEventListener('click', () => {
             const section = item.getAttribute('data-section');
+            
+            // 保存当前会话ID到本地存储，无论切换到哪个视图
+            if (currentSessionId) {
+                localStorage.setItem(`currentSessionId_${windowId}`, currentSessionId);
+                console.log('保存会话ID到本地存储:', currentSessionId);
+            }
             
             // 更新导航项状态
             navItems.forEach(nav => nav.classList.remove('active'));
@@ -68,10 +79,23 @@ function bindSidebarNavigation() {
             } else if (section === 'task') {
                 loadTasks();
             } else if (section === 'chat') {
+                // 尝试从本地存储恢复会话ID
+                const savedSessionId = localStorage.getItem(`currentSessionId_${windowId}`);
+                if (savedSessionId) {
+                    currentSessionId = savedSessionId;
+                    console.log('从本地存储恢复会话ID:', currentSessionId);
+                }
+                
                 // 如果有当前会话，显示对应对话
                 if (currentSessionId) {
-                    // 重新加载当前对话
-                    loadChatHistory(currentSessionId);
+                    // 不再自动重新加载对话历史，避免新消息被覆盖
+                    // 只有在切换到不同对话时才需要重新加载
+                    console.log('切换到聊天界面，保持当前对话内容');
+                    // 确保聊天区域可见
+                    if (chatArea) {
+                        chatArea.style.display = 'block';
+                    }
+                    hideInitializationUI();
                 } else {
                     // 没有会话时显示初始化界面
                     showInitializationUI();
@@ -99,87 +123,32 @@ function switchToChatSection() {
         sectionTitle.textContent = '聊天';
     }
     
+    // 尝试从本地存储恢复会话ID
+    const savedSessionId = localStorage.getItem(`currentSessionId_${windowId}`);
+    if (savedSessionId) {
+        currentSessionId = savedSessionId;
+        console.log('从本地存储恢复会话ID:', currentSessionId);
+    }
+    
     // 显示初始化界面或对话历史
     if (currentSessionId) {
-        // 重新加载当前对话
-        loadChatHistory(currentSessionId);
+        // 不再自动重新加载对话历史，避免新消息被覆盖
+        // 只有在切换到不同对话时才需要重新加载
+        console.log('切换到聊天界面，保持当前对话内容');
+        // 确保聊天区域可见
+        if (chatArea) {
+            chatArea.style.display = 'block';
+        }
+        hideInitializationUI();
     } else {
         // 没有会话时显示初始化界面
         showInitializationUI();
     }
 }
 
-// 发送消息
-async function sendMessage() {
-    const message = messageInput.value.trim();
-    if (!message) return;
-    
-    // 添加用户消息
-    addMessage('sent', message);
-    messageInput.value = '';
-    
-    // 调用后端API
-    try {
-        const response = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                message: message, 
-                user_id: 'default_user',
-                session_id: currentSessionId 
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error('API调用失败');
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            let responseContent = '已收到你的消息';
-            if (typeof data.response === 'object' && data.response !== null) {
-                if (data.response.message) {
-                    responseContent = data.response.message;
-                } else if (data.response.result) {
-                    responseContent = data.response.result;
-                } else if (data.response.success === false) {
-                    responseContent = '抱歉，无法理解你的请求，请换个方式表达。';
-                }
-            } else if (typeof data.response === 'string') {
-                responseContent = data.response;
-            }
-            addMessage('received', responseContent);
-        } else {
-            addMessage('received', '抱歉，出了点问题，请再试试。');
-        }
-    } catch (error) {
-        addMessage('received', '抱歉，出了点问题，请再试试。');
-        console.error('发送消息失败:', error);
-    }
-}
 
-// 添加消息到聊天区域
-function addMessage(type, content) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${type}`;
-    
-    if (type === 'received') {
-        messageDiv.innerHTML = `
-            <div class="avatar">🌟</div>
-            <div class="bubble">${content}</div>
-        `;
-    } else {
-        messageDiv.innerHTML = `
-            <div class="bubble">${content}</div>
-        `;
-    }
-    
-    chatArea.appendChild(messageDiv);
-    chatArea.scrollTop = chatArea.scrollHeight;
-}
+
+
 
 // 绑定设备控制事件
 function bindDeviceControls() {
@@ -562,6 +531,63 @@ async function createSchedule() {
     }
 }
 
+
+
+// 检查任务提醒
+async function checkTaskReminders() {
+    try {
+        const response = await fetch('/api/scheduler/list');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                const tasks = data.schedules;
+                const dueTasks = tasks.filter(task => {
+                    // 检查任务是否到期
+                    // 这里可以根据实际需求实现更复杂的检查逻辑
+                    return true;
+                });
+                
+                if (dueTasks.length > 0) {
+                    // 显示小红点提醒
+                    showNotificationBadge(dueTasks.length);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('检查任务提醒失败:', error);
+    }
+}
+
+// 显示通知小红点
+function showNotificationBadge(count) {
+    // 检查是否已经存在小红点
+    let badge = document.getElementById('notification-badge');
+    if (!badge) {
+        // 创建小红点元素
+        badge = document.createElement('div');
+        badge.id = 'notification-badge';
+        badge.className = 'notification-badge';
+        
+        // 将小红点添加到任务管理导航项
+        const taskNavItem = document.querySelector('.nav-item[data-section="task"]');
+        if (taskNavItem) {
+            taskNavItem.appendChild(badge);
+        }
+    }
+    
+    // 设置小红点计数
+    badge.textContent = count;
+    badge.style.display = 'inline-block';
+}
+
+// 清除通知小红点
+function clearNotificationBadge() {
+    const badge = document.getElementById('notification-badge');
+    if (badge) {
+        badge.style.display = 'none';
+    }
+}
+
 // 记忆蒸馏相关函数
 
 // 绑定记忆蒸馏标签页事件
@@ -680,6 +706,29 @@ function bindNewModuleEvents() {
         createScheduleBtn.addEventListener('click', createSchedule);
     }
     
+
+    
+    // 定时任务标签页切换
+    const schedulerTabBtns = document.querySelectorAll('.scheduler-tab-btn');
+    schedulerTabBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const tab = this.getAttribute('data-scheduler-tab');
+            
+            // 更新标签按钮状态
+            schedulerTabBtns.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // 更新标签内容
+            const tabPanes = document.querySelectorAll('.scheduler-tab-pane');
+            tabPanes.forEach(pane => pane.classList.remove('active'));
+            if (tab === 'regular') {
+                document.getElementById('regular-scheduler-tab').classList.add('active');
+            } else if (tab === 'batch_inference') {
+                document.getElementById('batch-inference-scheduler-tab').classList.add('active');
+            }
+        });
+    });
+    
     // 记忆蒸馏事件
     const startDistillationBtn = document.getElementById('start-distillation-btn');
     if (startDistillationBtn) {
@@ -703,6 +752,19 @@ function bindNewModuleEvents() {
 
 // 初始化应用
 function init() {
+    // 从本地存储中加载之前保存的会话ID，使用窗口唯一标识符作为键
+    const savedSessionId = localStorage.getItem(`currentSessionId_${windowId}`);
+    if (savedSessionId) {
+        currentSessionId = savedSessionId;
+        console.log('从本地存储加载会话ID:', currentSessionId);
+        // 加载对话历史
+        loadChatHistory(currentSessionId);
+    } else {
+        // 没有保存的会话ID，显示初始化界面
+        console.log('没有保存的会话ID，显示初始化界面');
+        showInitializationUI();
+    }
+    
     // 绑定事件
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => {
@@ -799,10 +861,31 @@ function init() {
     
     // 加载对话列表
     loadChats();
+    
+    // 检查任务提醒
+    checkTaskReminders();
+    
+    // 每60秒检查一次任务提醒
+    setInterval(checkTaskReminders, 60000);
+    
+    // 添加窗口焦点事件处理 - 移除自动重新加载对话历史，避免AI回复被覆盖
+    window.addEventListener('focus', () => {
+        console.log('窗口获得焦点');
+        if (currentSessionId) {
+            console.log('当前会话ID:', currentSessionId);
+            // 不再自动重新加载对话历史，避免AI回复被覆盖
+            // 只有在特定情况下（如手动刷新）才重新加载
+        } else {
+            console.log('当前没有活跃会话');
+        }
+    });
 }
 
-// 初始化应用
-init();
+// 初始化应用 - 确保DOM加载完成后执行
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM加载完成，开始初始化应用');
+    init();
+});
 
 // 对话管理相关函数
 
@@ -826,6 +909,16 @@ async function loadChats() {
             } else if (!currentSessionId) {
                 // 只有在当前没有会话时才切换到第一个对话
                 switchChat(data.chats[0].session_id, data.chats[0].name);
+            } else {
+                // 如果有已保存的会话ID，检查该会话是否存在
+                const savedChat = data.chats.find(chat => chat.session_id === currentSessionId);
+                if (savedChat) {
+                    // 如果已保存的会话存在，切换到该会话
+                    switchChat(savedChat.session_id, savedChat.name);
+                } else {
+                    // 如果已保存的会话不存在，切换到第一个对话
+                    switchChat(data.chats[0].session_id, data.chats[0].name);
+                }
             }
         }
     } catch (error) {
@@ -909,9 +1002,19 @@ async function confirmCreateChat() {
         const data = await response.json();
         console.log('创建新对话响应数据:', data);
         if (data.success) {
+            // 获取新创建的对话信息
+            const newChat = data.chat;
+            console.log('新创建的对话:', newChat);
+            
             // 重新加载对话列表
             console.log('创建新对话成功，开始加载对话列表');
-            loadChats();
+            await loadChats();
+            
+            // 切换到新创建的对话
+            if (newChat && newChat.session_id) {
+                console.log('切换到新创建的对话，session_id:', newChat.session_id);
+                await switchChat(newChat.session_id, newChat.name);
+            }
         }
     } catch (error) {
         console.error('创建新对话失败:', error);
@@ -930,7 +1033,22 @@ function closeModal() {
 
 // 切换对话
 async function switchChat(sessionId, chatName) {
+    console.log('切换对话，sessionId:', sessionId, 'chatName:', chatName);
+    // 确保sessionId有效
+    if (!sessionId) {
+        console.error('switchChat: sessionId无效');
+        return;
+    }
+    
+    // 如果点击的是当前活跃的对话，直接返回，避免重复加载
+    if (currentSessionId === sessionId) {
+        console.log('点击的是当前活跃的对话，无需重新加载');
+        return;
+    }
+    
+    // 设置currentSessionId
     currentSessionId = sessionId;
+    console.log('currentSessionId已更新为:', currentSessionId);
     
     // 更新标题
     if (sectionTitle) {
@@ -942,16 +1060,23 @@ async function switchChat(sessionId, chatName) {
     contentSections.forEach(sec => sec.classList.remove('active'));
     document.getElementById('chat-section').classList.add('active');
     
-    // 清空聊天区域
+    // 显示加载状态
     if (chatArea) {
-        chatArea.innerHTML = '';
+        chatArea.innerHTML = '<div class="loading-message">加载对话中...</div>';
+        chatArea.style.display = 'block';
+        // 隐藏初始化界面
+        hideInitializationUI();
     }
     
-    // 显示初始化界面
-    showInitializationUI();
-    
     // 加载对话历史
-    await loadChatHistory(sessionId);
+    try {
+        await loadChatHistory(sessionId);
+    } catch (error) {
+        console.error('加载对话历史失败:', error);
+        if (chatArea) {
+            chatArea.innerHTML = '<div class="error-message">加载对话失败，请刷新页面重试</div>';
+        }
+    }
     
     // 直接更新对话列表的活跃状态，不重新加载整个对话列表
     if (chatList) {
@@ -963,12 +1088,25 @@ async function switchChat(sessionId, chatName) {
         const activeItem = document.querySelector(`.chat-item[data-session-id="${sessionId}"]`);
         if (activeItem) {
             activeItem.classList.add('active');
+        } else {
+            console.warn('未找到对应sessionId的聊天项:', sessionId);
+            // 如果未找到，重新加载对话列表
+            loadChats();
         }
     }
+    
+    // 保存当前会话ID到本地存储，使用窗口唯一标识符作为键，确保页面刷新后仍能恢复
+    localStorage.setItem(`currentSessionId_${windowId}`, sessionId);
 }
 
 // 加载对话历史
 async function loadChatHistory(sessionId) {
+    // 如果正在进行流式响应，不重新加载对话历史
+    if (isStreaming) {
+        console.log('正在进行流式响应，跳过对话历史加载');
+        return;
+    }
+    
     console.log('loadChatHistory() 被调用，sessionId:', sessionId);
     if (!chatArea) {
         console.error('chatArea 未找到');
@@ -977,16 +1115,42 @@ async function loadChatHistory(sessionId) {
     
     try {
         console.log('开始加载对话历史');
+        
         const response = await fetch(`/api/chats/${sessionId}/history`);
         console.log('加载对话历史响应:', response);
+        
         if (!response.ok) {
-            throw new Error('API调用失败');
+            throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
         }
         
         const data = await response.json();
         console.log('加载对话历史响应数据:', data);
+        
         if (data.success) {
             console.log('对话历史长度:', data.history.length);
+            
+            // 清空聊天区域
+            chatArea.innerHTML = '';
+            
+            // 检查对话历史是否为空
+            if (data.history.length === 0) {
+                console.log('对话历史为空');
+                // 即使对话历史为空，也要保持当前会话ID
+                localStorage.setItem(`currentSessionId_${windowId}`, sessionId);
+                showInitializationUI();
+                // 隐藏聊天区域
+                if (chatArea) {
+                    chatArea.style.display = 'none';
+                }
+                return;
+            }
+            
+            // 显示聊天区域
+            if (chatArea) {
+                chatArea.style.display = 'block';
+            }
+            
+            // 显示对话历史
             data.history.forEach(message => {
                 if (message.user) {
                     addMessage('sent', message.user);
@@ -995,13 +1159,17 @@ async function loadChatHistory(sessionId) {
                 }
             });
             
-            // 如果有对话历史，隐藏初始化界面
-            if (data.history.length > 0) {
-                hideInitializationUI();
-            }
+            // 隐藏初始化界面
+            hideInitializationUI();
+            // 保存会话ID到本地存储
+            localStorage.setItem(`currentSessionId_${windowId}`, sessionId);
+        } else {
+            console.error('加载对话历史失败:', data.message || '未知错误');
+            chatArea.innerHTML = '<div class="error-message">' + (data.message || '加载对话历史失败') + '</div>';
         }
     } catch (error) {
         console.error('加载对话历史失败:', error);
+        chatArea.innerHTML = '<div class="error-message">加载对话历史失败，请检查网络连接后重试</div>';
     }
 }
 
@@ -1092,11 +1260,7 @@ async function deleteChatById(sessionId) {
     }
 }
 
-// 发送示例消息
-function sendExampleMessage(message) {
-    messageInput.value = message;
-    sendMessage();
-}
+
 
 // 发送问题
 function sendQuestion(question) {
@@ -1112,6 +1276,7 @@ function showInitializationUI() {
     if (initializationUI) {
         initializationUI.style.display = 'flex';
     }
+    // 隐藏聊天区域
     if (chatArea) {
         chatArea.style.display = 'none';
     }
@@ -1123,6 +1288,7 @@ function hideInitializationUI() {
     if (initializationUI) {
         initializationUI.style.display = 'none';
     }
+    // 显示聊天区域
     if (chatArea) {
         chatArea.style.display = 'block';
     }
@@ -1141,50 +1307,319 @@ async function sendMessage() {
     messageInput.value = '';
     
     // 调用后端API
-    try {
-        const response = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                message: message, 
-                user_id: 'default_user',
-                session_id: currentSessionId 
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error('API调用失败');
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            let responseContent = '已收到你的消息';
-            if (typeof data.response === 'object' && data.response !== null) {
-                if (data.response.message) {
-                    responseContent = data.response.message;
-                } else if (data.response.result) {
-                    responseContent = data.response.result;
-                } else if (data.response.success === false) {
-                    responseContent = '抱歉，无法理解你的请求，请换个方式表达。';
-                }
-            } else if (typeof data.response === 'string') {
-                responseContent = data.response;
+    await sendMessageWithRetry(message, 3); // 最多重试3次
+}
+
+// 带重试机制的消息发送函数
+async function sendMessageWithRetry(message, maxRetries) {
+    let retries = 0;
+    const thinkingMessageId = 'thinking-' + Date.now();
+    let answerMessageId = null;
+    let answerContent = ''; // 累积答案内容
+    isStreaming = true; // 标记是否正在进行流式响应
+    
+    while (retries < maxRetries) {
+        try {
+            // 第一次尝试时添加思考过程消息
+            if (retries === 0) {
+                addMessage('thinking', '正在思考...', thinkingMessageId);
+            } else {
+                // 重试时更新思考过程消息
+                updateThinkingMessage(thinkingMessageId, `网络连接不稳定，正在重试... ${retries+1}/${maxRetries}`);
             }
-            addMessage('received', responseContent);
+            
+            // 使用fetch API发送请求
+            console.log('发送API请求:', {
+                message: message,
+                user_id: 'default_user',
+                session_id: currentSessionId,
+                stream: true
+            });
+            
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    message: message, 
+                    user_id: 'default_user',
+                    session_id: currentSessionId,
+                    stream: true
+                })
+            });
+            
+            console.log('API响应状态:', response.status);
+            
+            if (!response.ok) {
+                // 处理HTTP错误
+                const errorMessage = `服务器错误: ${response.status} ${response.statusText}`;
+                throw new Error(errorMessage);
+            }
+            
+            // 处理流式响应
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let receivedData = false;
+            let hasError = false;
+            
+            console.log('开始处理流式响应');
+            
+            while (true) {
+                try {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        isStreaming = false; // 流式响应结束
+                        break;
+                    }
+                    
+                    receivedData = true;
+                    buffer += decoder.decode(value, { stream: true });
+                    console.log('收到数据:', buffer.length, '字节');
+                    
+                    // 处理SSE格式的数据
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // 保留不完整的最后一行
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.substring(6);
+                            if (dataStr) {
+                                try {
+                                    console.log('解析数据:', dataStr);
+                                    const data = JSON.parse(dataStr);
+                                    
+                                    // 检查是否是错误响应格式
+                                    if (data.success === false && data.error) {
+                                        // 移除思考过程消息
+                                        removeThinkingMessage(thinkingMessageId);
+                                        // 添加错误消息
+                                        addMessage('received', data.error);
+                                        // 标记为已收到数据
+                                        receivedData = true;
+                                        hasError = true;
+                                        isStreaming = false; // 流式响应结束
+                                        console.log('收到错误消息:', data.error);
+                                    } 
+                                    // 更新思考过程或累积答案内容
+                                    else if (data.type === 'session_id') {
+                                        // 保存会话ID
+                                        currentSessionId = data.content;
+                                        console.log('获取到新的会话ID:', currentSessionId);
+                                        // 保存到本地存储
+                                        localStorage.setItem(`currentSessionId_${windowId}`, currentSessionId);
+                                    } else if (data.type === 'thinking') {
+                                        updateThinkingMessage(thinkingMessageId, data.content);
+                                    } else if (data.type === 'searching') {
+                                        updateThinkingMessage(thinkingMessageId, data.content);
+                                    } else if (data.type === 'answer') {
+                                        // 累积答案内容
+                                        answerContent += data.content;
+                                        console.log('收到答案内容:', answerContent);
+                                        
+                                        // 实时更新UI
+                                        if (!answerMessageId) {
+                                            // 第一次收到答案内容，移除思考过程消息并创建答案消息
+                                            removeThinkingMessage(thinkingMessageId);
+                                            answerMessageId = 'answer-' + Date.now();
+                                            addMessage('received', answerContent, answerMessageId);
+                                        } else {
+                                            // 更新现有答案消息
+                                            updateAnswerMessage(answerMessageId, answerContent);
+                                        }
+                                    } else if (data.type === 'error') {
+                                        // 移除思考过程消息
+                                        removeThinkingMessage(thinkingMessageId);
+                                        // 添加错误消息
+                                        addMessage('received', data.content);
+                                        // 标记为已收到数据
+                                        receivedData = true;
+                                        hasError = true;
+                                        isStreaming = false; // 流式响应结束
+                                        console.log('收到错误消息:', data.content);
+                                    } else if (data.type === 'stream_end') {
+                                        // 流式响应结束，不做特殊处理
+                                        isStreaming = false; // 流式响应结束
+                                        console.log('流式响应结束');
+                                    } else {
+                                        // 处理其他类型的数据
+                                        console.log('收到其他类型的数据:', data);
+                                    }
+                                } catch (e) {
+                                    console.error('解析SSE数据失败:', e);
+                                    console.error('失败的数据:', dataStr);
+                                    // 显示解析错误
+                                    if (!hasError) {
+                                        removeThinkingMessage(thinkingMessageId);
+                                        addMessage('received', '解析响应数据失败，请稍后重试');
+                                        hasError = true;
+                                        isStreaming = false; // 流式响应结束
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('处理流式数据失败:', e);
+                    // 显示处理错误
+                    if (!hasError) {
+                        removeThinkingMessage(thinkingMessageId);
+                        addMessage('received', '处理响应数据失败，请稍后重试');
+                        hasError = true;
+                        isStreaming = false; // 流式响应结束
+                    }
+                }
+            }
+            
+            // 流式响应结束后，确保答案已显示
+            if (answerContent && !hasError && answerMessageId) {
+                // 答案已经通过实时更新显示，这里不需要再做什么
+                console.log('流式响应处理完成，答案已实时显示');
+            } else if (!answerContent && !hasError) {
+                // 如果没有收到答案内容且没有错误，显示默认回答
+                removeThinkingMessage(thinkingMessageId);
+                addMessage('received', '你好！我是悦悦，有什么可以帮到你的吗？');
+                console.log('没有收到答案内容，显示默认回答');
+            } else if (hasError) {
+                // 如果有错误，显示错误消息
+                console.log('流式响应处理完成，有错误');
+            }
+            
+            // 如果没有收到任何数据，视为失败
+            if (!receivedData) {
+                removeThinkingMessage(thinkingMessageId);
+                addMessage('received', '抱歉，服务器无响应，请稍后重试');
+                console.log('没有收到任何数据');
+                return;
+            }
+            
+            console.log('流式响应处理完成');
+            console.log('Answer content:', answerContent);
+            console.log('Has error:', hasError);
+            console.log('Received data:', receivedData);
+            console.log('Is streaming:', isStreaming);
             
             // 更新当前会话ID（如果是新创建的对话）
-            if (data.session_id && !currentSessionId) {
-                currentSessionId = data.session_id;
-                // 不需要重新加载对话列表，因为我们已经设置了 currentSessionId
+            // 注意：由于使用了流式响应，会话ID需要从流式数据中获取
+            // 这里我们假设后端在流式响应中返回了会话ID
+            // 如果currentSessionId为空，说明是新创建的对话，需要重新加载对话列表
+            if (!currentSessionId) {
+                console.log('新创建的对话，重新加载对话列表');
+                await loadChats();
             }
-        } else {
-            addMessage('received', '抱歉，出了点问题，请再试试。');
+            
+            // 不再自动重新加载对话历史，避免对话消失
+            // 对话历史已经通过实时更新显示，不需要重新加载
+            console.log('对话处理完成，答案已实时显示');
+            // 只有在用户手动刷新或切换对话时才重新加载对话历史
+            
+            return;
+        } catch (error) {
+            console.error('发送消息失败:', error);
+            retries++;
+            isStreaming = false; // 流式响应结束
+            
+            // 如果达到最大重试次数，显示错误消息
+            if (retries >= maxRetries) {
+                removeThinkingMessage(thinkingMessageId);
+                addMessage('received', `抱歉，${error.message}，请检查网络后再试试。`);
+                return;
+            }
+            
+            // 等待一段时间后重试
+            await new Promise(resolve => setTimeout(resolve, 1000 * retries));
         }
-    } catch (error) {
-        addMessage('received', '抱歉，出了点问题，请再试试。');
-        console.error('发送消息失败:', error);
+    }
+}
+
+// 检查是否正在进行流式响应
+function isStreamingResponse() {
+    return isStreaming;
+}
+
+// 更新答案消息
+function updateAnswerMessage(id, content) {
+    const messageDiv = document.getElementById(id);
+    if (messageDiv) {
+        const bubble = messageDiv.querySelector('.bubble');
+        if (bubble) {
+            // 处理特殊格式，确保格式的完整性
+            const formattedContent = formatContent(content);
+            bubble.innerHTML = formattedContent;
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+    }
+}
+
+// 格式化内容，确保特殊格式正确显示
+function formatContent(content) {
+    if (!content) return '';
+    
+    // 处理换行符，确保它们在HTML中正确显示
+    let formatted = content.replace(/\n/g, '<br>');
+    
+    // 处理代码块
+    formatted = formatted.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+    
+    // 处理粗体
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // 处理斜体
+    formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    
+    // 处理列表
+    formatted = formatted.replace(/^\s*\-\s(.*?)$/gm, '<li>$1</li>');
+    formatted = formatted.replace(/(<li>.*?<\/li>)/s, '<ul>$1</ul>');
+    
+    return formatted;
+}
+
+// 添加消息到聊天区域
+function addMessage(type, content, id = null) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${type}`;
+    if (id) {
+        messageDiv.id = id;
+    }
+    
+    if (type === 'received') {
+        messageDiv.innerHTML = `
+            <div class="avatar">🌟</div>
+            <div class="bubble">${content}</div>
+        `;
+    } else if (type === 'thinking') {
+        messageDiv.innerHTML = `
+            <div class="avatar">🤔</div>
+            <div class="bubble thinking">${content}</div>
+        `;
+    } else {
+        messageDiv.innerHTML = `
+            <div class="bubble">${content}</div>
+        `;
+    }
+    
+    chatArea.appendChild(messageDiv);
+    chatArea.scrollTop = chatArea.scrollHeight;
+    return messageDiv;
+}
+
+// 更新思考过程消息
+function updateThinkingMessage(id, content) {
+    const messageDiv = document.getElementById(id);
+    if (messageDiv) {
+        const bubble = messageDiv.querySelector('.bubble');
+        if (bubble) {
+            bubble.textContent = content;
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+    }
+}
+
+// 移除思考过程消息
+function removeThinkingMessage(id) {
+    const messageDiv = document.getElementById(id);
+    if (messageDiv) {
+        messageDiv.remove();
     }
 }

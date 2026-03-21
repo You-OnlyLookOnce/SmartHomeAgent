@@ -2,8 +2,14 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime
 from typing import Dict, List, Optional
+
+from src.tools.datetime_utils import format_local_datetime
+
+# 简化版日志配置
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class IndependentSessionManager:
     """独立会话管理器 - 负责对话的创建、管理和持久化"""
@@ -28,6 +34,10 @@ class IndependentSessionManager:
             os.makedirs(self.base_dir)
         if not os.path.exists(self.sessions_dir):
             os.makedirs(self.sessions_dir)
+        # 确保日志目录存在
+        logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
     
     def _load_chats(self) -> Dict:
         """加载chats.json文件"""
@@ -61,7 +71,7 @@ class IndependentSessionManager:
         session_id = str(time.time_ns())
         
         # 创建会话对象
-        now = datetime.utcnow().isoformat() + "Z"
+        now = format_local_datetime('%Y-%m-%dT%H:%M:%S')
         chat = {
             "channel": "Yueyue",
             "created_at": now,
@@ -78,12 +88,15 @@ class IndependentSessionManager:
         self._save_chats(self.chats)
         
         # 初始化会话上下文
-        self.active_sessions[session_id] = {
+        context = {
             "session_id": session_id,
             "conversation_history": [],
             "tool_states": {},
             "variables": {}
         }
+        self.active_sessions[session_id] = context
+        # 保存会话上下文到文件
+        self.save_session_context(session_id, context)
         
         return chat
     
@@ -103,7 +116,7 @@ class IndependentSessionManager:
         for chat in self.chats["chats"]:
             if chat["session_id"] == session_id:
                 chat["name"] = name
-                chat["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                chat["updated_at"] = format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 self._save_chats(self.chats)
                 return True
         return False
@@ -133,16 +146,28 @@ class IndependentSessionManager:
     
     def save_session_context(self, session_id: str, context: Dict):
         """保存会话上下文"""
-        # 更新内存中的上下文
-        self.active_sessions[session_id] = context
-        
-        # 保存到文件
-        session_file = os.path.join(self.sessions_dir, f"{session_id}.json")
         try:
+            # 更新内存中的上下文
+            self.active_sessions[session_id] = context
+            
+            # 确保目录存在
+            os.makedirs(self.sessions_dir, exist_ok=True)
+            
+            # 保存到文件
+            session_file = os.path.join(self.sessions_dir, f"{session_id}.json")
             with open(session_file, "w", encoding="utf-8") as f:
                 json.dump(context, f, ensure_ascii=False, indent=2)
+            logger.info(f"会话上下文保存成功，文件: {session_file}")
+            return True
+        except IOError as e:
+            logger.error(f"保存会话上下文失败 - IO错误: {e}")
+            return False
+        except TypeError as e:
+            logger.error(f"保存会话上下文失败 - 类型错误（可能是JSON序列化问题）: {e}")
+            return False
         except Exception as e:
-            print(f"保存会话上下文失败: {e}")
+            logger.error(f"保存会话上下文失败 - 未知错误: {e}")
+            return False
     
     def load_session_context(self, session_id: str) -> Dict:
         """加载会话上下文"""
@@ -171,25 +196,118 @@ class IndependentSessionManager:
     
     def update_conversation_history(self, session_id: str, user_message: str, assistant_message: str):
         """更新对话历史"""
-        context = self.load_session_context(session_id)
-        
-        # 添加用户消息
-        context["conversation_history"].append({"user": user_message})
-        # 添加助手消息
-        context["conversation_history"].append({"assistant": assistant_message})
-        
-        # 限制对话历史长度
-        if len(context["conversation_history"]) > 40:  # 20轮对话
-            # 保留最近的20轮对话
-            context["conversation_history"] = context["conversation_history"][-20:]
-        
-        # 保存上下文
-        self.save_session_context(session_id, context)
+        try:
+            context = self.load_session_context(session_id)
+            
+            # 添加用户消息
+            context["conversation_history"].append({"user": user_message})
+            # 添加助手消息
+            context["conversation_history"].append({"assistant": assistant_message})
+            
+            # 限制对话历史长度
+            if len(context["conversation_history"]) > 40:  # 20轮对话
+                # 保留最近的20轮对话
+                context["conversation_history"] = context["conversation_history"][-40:]
+            
+            # 保存上下文
+            success = self.save_session_context(session_id, context)
+            if success:
+                logger.info(f"对话历史更新成功，会话ID: {session_id}")
+            else:
+                logger.error(f"对话历史更新失败，会话ID: {session_id}")
+            return success
+        except IOError as e:
+            logger.error(f"更新对话历史失败 - IO错误: {e}")
+            return False
+        except TypeError as e:
+            logger.error(f"更新对话历史失败 - 类型错误（可能是JSON序列化问题）: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"更新对话历史失败 - 未知错误: {e}")
+            return False
     
     def get_conversation_history(self, session_id: str) -> List[Dict]:
         """获取对话历史"""
         context = self.load_session_context(session_id)
         return context.get("conversation_history", [])
+    
+    def save_conversation_history(self, session_id: str, user_message: str, assistant_message: str) -> bool:
+        """
+        全新的对话历史保存函数
+        用于将用户发送的前端信息和AI生成的新回答完整保存到历史聊天记录JSON文件中
+        
+        Args:
+            session_id (str): 会话ID
+            user_message (str): 用户输入文本
+            assistant_message (str): AI响应内容
+            
+        Returns:
+            bool: 保存成功返回True，失败返回False
+        """
+        try:
+            logger.info(f"开始保存对话历史，会话ID: {session_id}")
+            
+            # 加载现有会话上下文
+            context = self.load_session_context(session_id)
+            logger.debug(f"加载会话上下文成功，当前对话历史长度: {len(context.get('conversation_history', []))}")
+            
+            # 获取当前时间戳
+            timestamp = format_local_datetime('%Y-%m-%dT%H:%M:%S')
+            
+            # 添加用户消息
+            user_entry = {
+                "user": user_message,
+                "timestamp": timestamp
+            }
+            context["conversation_history"].append(user_entry)
+            logger.debug(f"添加用户消息成功: {user_message[:50]}...")
+            
+            # 添加助手消息
+            assistant_entry = {
+                "assistant": assistant_message,
+                "timestamp": timestamp
+            }
+            context["conversation_history"].append(assistant_entry)
+            logger.debug(f"添加助手消息成功: {assistant_message[:50]}...")
+            
+            # 限制对话历史长度，保留最近的20轮对话（40条消息）
+            if len(context["conversation_history"]) > 40:
+                context["conversation_history"] = context["conversation_history"][-40:]
+                logger.debug("对话历史长度超过限制，已截断")
+            
+            # 确保目录存在
+            os.makedirs(self.sessions_dir, exist_ok=True)
+            logger.debug(f"确保目录存在: {self.sessions_dir}")
+            
+            # 保存到文件
+            session_file = os.path.join(self.sessions_dir, f"{session_id}.json")
+            logger.debug(f"准备保存到文件: {session_file}")
+            
+            with open(session_file, "w", encoding="utf-8") as f:
+                json.dump(context, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"对话历史保存成功，文件: {session_file}")
+            return True
+        except PermissionError as e:
+            logger.error(f"保存对话历史失败 - 权限错误: {e}")
+            logger.error(f"请检查目录权限: {self.sessions_dir}")
+            return False
+        except IOError as e:
+            logger.error(f"保存对话历史失败 - IO错误: {e}")
+            return False
+        except TypeError as e:
+            logger.error(f"保存对话历史失败 - 类型错误（可能是JSON序列化问题）: {e}")
+            logger.error(f"用户消息: {user_message[:100]}...")
+            logger.error(f"助手消息: {assistant_message[:100]}...")
+            return False
+        except json.JSONDecodeError as e:
+            logger.error(f"保存对话历史失败 - JSON解码错误: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"保存对话历史失败 - 未知错误: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
     
     def clear_conversation_history(self, session_id: str):
         """清空对话历史"""

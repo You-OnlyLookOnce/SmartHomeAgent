@@ -1,0 +1,47 @@
+{
+  "test_time": "2026-03-21 11:23:53",
+  "test_environment": "http://localhost:5000",
+  "test_results": [
+    {
+      "test_id": "TC-001",
+      "test_name": "启动应用",
+      "status": "PASS",
+      "message": "应用成功启动，聊天区域加载完成"
+    },
+    {
+      "test_id": "TC-002",
+      "test_name": "创建新对话",
+      "status": "PASS",
+      "message": "成功创建新对话"
+    },
+    {
+      "test_id": "TC-003",
+      "test_name": "发送消息",
+      "status": "PASS",
+      "message": "消息发送成功，等待AI回复"
+    },
+    {
+      "test_id": "TC-004",
+      "test_name": "切换到设备控制视图",
+      "status": "PASS",
+      "message": "成功切换到设备控制视图"
+    },
+    {
+      "test_id": "TC-005",
+      "test_name": "切换回聊天视图",
+      "status": "FAIL",
+      "message": "切换回聊天视图失败: Message: \nStacktrace:\n\tchromedriver!GetHandleVerifier [0x7ff71cbd3045+14585]\n\tchromedriver!GetHandleVerifier [0x7ff71cbd30b0+145f0]\n\tchromedriver!(No symbol) [0x7ff71c93db7d]\n\tchromedriver!(No symbol) [0x7ff71c9973ae]\n\tchromedriver!(No symbol) [0x7ff71c9976bc]\n\tchromedriver!(No symbol) [0x7ff71c9e7a57]\n\tchromedriver!(No symbol) [0x7ff71c9e45af]\n\tchromedriver!(No symbol) [0x7ff71c989a18]\n\tchromedriver!(No symbol) [0x7ff71c98a8f3]\n\tchromedriver!GetHandleVerifier [0x7ff71cedac5d+31c19d]\n\tchromedriver!GetHandleVerifier [0x7ff71ced536d+3168ad]\n\tchromedriver!GetHandleVerifier [0x7ff71cef7d8a+3392ca]\n\tchromedriver!GetHandleVerifier [0x7ff71cbef445+30985]\n\tchromedriver!GetHandleVerifier [0x7ff71cbf84dc+39a1c]\n\tchromedriver!GetHandleVerifier [0x7ff71cbdc634+1db74]\n\tchromedriver!GetHandleVerifier [0x7ff71cbdc7e6+1dd26]\n\tchromedriver!GetHandleVerifier [0x7ff71cbc1387+28c7]\n\tKERNEL32!BaseThreadInitThunk [0x7ffc8b67e8d7+17]\n\tntdll!RtlUserThreadStart [0x7ffc8c7ec48c+2c]\n"
+    },
+    {
+      "test_id": "TC-006",
+      "test_name": "检查聊天历史",
+      "status": "FAIL",
+      "message": "聊天历史不完整，缺少之前发送的消息"
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 4,
+    "failed": 2
+  }
+}

@@ -1,8 +1,0 @@
-{
-  "qiniu": {
-    "access_key": "0",
-    "secret_key": "0",
-    "bucket_name": "your_bucket_name",
-    "domain": "https://your_bucket_name.qiniup.com"
-  }
-}

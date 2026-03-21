@@ -480,6 +480,30 @@ body {
     color: white;
 }
 
+.message.thinking .bubble {
+    background: var(--bg-glass);
+    color: var(--text-secondary);
+    font-style: italic;
+    position: relative;
+}
+
+.message.thinking .bubble::after {
+    content: '';
+    position: absolute;
+    bottom: 8px;
+    right: 12px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--text-muted);
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 /* 输入区域 */
 .input-area {
     display: flex;
@@ -1204,4 +1228,89 @@ body {
     .memory-tabs {
         flex-direction: column;
     }
+}
+
+/* 通知小红点样式 */
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: #ff4757;
+    color: white;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.nav-item {
+    position: relative;
+}
+
+/* 定时任务标签页样式 */
+.scheduler-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.scheduler-tab-btn {
+    flex: 1;
+    padding: 10px 15px;
+    border: none;
+    border-radius: var(--radius-small);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition-smooth);
+}
+
+.scheduler-tab-btn:hover {
+    background: var(--theme-primary);
+    color: white;
+}
+
+.scheduler-tab-btn.active {
+    background: var(--theme-primary);
+    color: white;
+    font-weight: 500;
+}
+
+.scheduler-tab-content {
+    margin-bottom: 20px;
+}
+
+.scheduler-tab-pane {
+    display: none;
+}
+
+.scheduler-tab-pane.active {
+    display: block;
+}
+
+/* 加载消息 */
+.loading-message {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-secondary);
+    font-style: italic;
+    background: var(--bg-glass);
+    border-radius: var(--radius-small);
+    margin: 10px 0;
+}
+
+/* 错误消息 */
+.error-message {
+    text-align: center;
+    padding: 20px;
+    color: var(--error);
+    background: rgba(229, 115, 115, 0.1);
+    border: 1px solid var(--error);
+    border-radius: var(--radius-small);
+    margin: 10px 0;
 }
