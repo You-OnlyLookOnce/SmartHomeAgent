@@ -5,6 +5,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from src.tools.datetime_utils import format_local_datetime
+from src.agent.langchain_memory_manager import LangChainMemoryManager
 
 # 简化版日志配置
 import logging
@@ -92,9 +93,12 @@ class IndependentSessionManager:
             "session_id": session_id,
             "conversation_history": [],
             "tool_states": {},
-            "variables": {}
+            "variables": {},
+            "memory_manager": None
         }
         self.active_sessions[session_id] = context
+        # 初始化记忆管理器
+        self._init_memory_manager(session_id)
         # 保存会话上下文到文件
         self.save_session_context(session_id, context)
         
@@ -153,10 +157,13 @@ class IndependentSessionManager:
             # 确保目录存在
             os.makedirs(self.sessions_dir, exist_ok=True)
             
+            # 创建一个可序列化的上下文副本，排除memory_manager
+            serializable_context = {k: v for k, v in context.items() if k != "memory_manager"}
+            
             # 保存到文件
             session_file = os.path.join(self.sessions_dir, f"{session_id}.json")
             with open(session_file, "w", encoding="utf-8") as f:
-                json.dump(context, f, ensure_ascii=False, indent=2)
+                json.dump(serializable_context, f, ensure_ascii=False, indent=2)
             logger.info(f"会话上下文保存成功，文件: {session_file}")
             return True
         except IOError as e:
@@ -168,6 +175,17 @@ class IndependentSessionManager:
         except Exception as e:
             logger.error(f"保存会话上下文失败 - 未知错误: {e}")
             return False
+    
+    def _init_memory_manager(self, session_id: str):
+        """初始化记忆管理器"""
+        context = self.active_sessions.get(session_id)
+        if context:
+            # 创建记忆管理器实例
+            memory_manager = LangChainMemoryManager()
+            # 尝试从文件加载记忆
+            memory_file = os.path.join(self.sessions_dir, f"{session_id}_memory.json")
+            memory_manager.load_from_file(memory_file)
+            context["memory_manager"] = memory_manager
     
     def load_session_context(self, session_id: str) -> Dict:
         """加载会话上下文"""
@@ -182,17 +200,24 @@ class IndependentSessionManager:
                 with open(session_file, "r", encoding="utf-8") as f:
                     context = json.load(f)
                     self.active_sessions[session_id] = context
+                    # 初始化记忆管理器
+                    self._init_memory_manager(session_id)
                     return context
             except Exception as e:
                 print(f"加载会话上下文失败: {e}")
         
         # 返回默认上下文
-        return {
+        context = {
             "session_id": session_id,
             "conversation_history": [],
             "tool_states": {},
-            "variables": {}
+            "variables": {},
+            "memory_manager": None
         }
+        self.active_sessions[session_id] = context
+        # 初始化记忆管理器
+        self._init_memory_manager(session_id)
+        return context
     
     def update_conversation_history(self, session_id: str, user_message: str, assistant_message: str):
         """更新对话历史"""
@@ -279,12 +304,24 @@ class IndependentSessionManager:
             os.makedirs(self.sessions_dir, exist_ok=True)
             logger.debug(f"确保目录存在: {self.sessions_dir}")
             
+            # 更新记忆管理器
+            memory_manager = context.get("memory_manager")
+            if memory_manager:
+                memory_manager.add_message(user_message, assistant_message)
+                # 保存记忆到文件
+                memory_file = os.path.join(self.sessions_dir, f"{session_id}_memory.json")
+                memory_manager.save_to_file(memory_file)
+                logger.debug(f"记忆保存成功，文件: {memory_file}")
+            
+            # 创建一个可序列化的上下文副本，排除memory_manager
+            serializable_context = {k: v for k, v in context.items() if k != "memory_manager"}
+            
             # 保存到文件
             session_file = os.path.join(self.sessions_dir, f"{session_id}.json")
             logger.debug(f"准备保存到文件: {session_file}")
             
             with open(session_file, "w", encoding="utf-8") as f:
-                json.dump(context, f, ensure_ascii=False, indent=2)
+                json.dump(serializable_context, f, ensure_ascii=False, indent=2)
             
             logger.info(f"对话历史保存成功，文件: {session_file}")
             return True

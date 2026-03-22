@@ -500,6 +500,30 @@ body {
     animation: spin 1s linear infinite;
 }
 
+.message.searching {
+    justify-content: flex-start;
+}
+
+.message.searching .bubble {
+    background: var(--info);
+    color: white;
+    position: relative;
+    padding-right: 40px;
+}
+
+.message.searching .bubble::after {
+    content: '';
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 1s linear infinite;
+}
+
 @keyframes spin {
     to { transform: rotate(360deg); }
 }

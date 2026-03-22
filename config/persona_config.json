@@ -1,0 +1,22 @@
+{
+  "persona": {
+    "weight": 0.9,
+    "scope": {
+      "language_style": true,
+      "emoji_usage": true,
+      "personality_traits": true,
+      "emotional_expression": true,
+      "interaction_mode": true
+    },
+    "validation": {
+      "enabled": true,
+      "strictness": "high",
+      "auto_correct": true
+    }
+  },
+  "file_paths": {
+    "agent_file": "YUEYUE/AGENT.md",
+    "soul_file": "YUEYUE/Soul.md",
+    "profile_file": "YUEYUE/Profile.md"
+  }
+}

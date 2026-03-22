@@ -1412,7 +1412,10 @@ async function sendMessageWithRetry(message, maxRetries) {
                                     } else if (data.type === 'thinking') {
                                         updateThinkingMessage(thinkingMessageId, data.content);
                                     } else if (data.type === 'searching') {
-                                        updateThinkingMessage(thinkingMessageId, data.content);
+                                        // 移除思考过程消息并显示搜索状态提示
+                                        removeThinkingMessage(thinkingMessageId);
+                                        thinkingMessageId = 'searching-' + Date.now();
+                                        addMessage('searching', data.content, thinkingMessageId);
                                     } else if (data.type === 'answer') {
                                         // 累积答案内容
                                         answerContent += data.content;
@@ -1420,7 +1423,7 @@ async function sendMessageWithRetry(message, maxRetries) {
                                         
                                         // 实时更新UI
                                         if (!answerMessageId) {
-                                            // 第一次收到答案内容，移除思考过程消息并创建答案消息
+                                            // 第一次收到答案内容，移除搜索状态提示并创建答案消息
                                             removeThinkingMessage(thinkingMessageId);
                                             answerMessageId = 'answer-' + Date.now();
                                             addMessage('received', answerContent, answerMessageId);
@@ -1429,7 +1432,7 @@ async function sendMessageWithRetry(message, maxRetries) {
                                             updateAnswerMessage(answerMessageId, answerContent);
                                         }
                                     } else if (data.type === 'error') {
-                                        // 移除思考过程消息
+                                        // 移除搜索状态提示
                                         removeThinkingMessage(thinkingMessageId);
                                         // 添加错误消息
                                         addMessage('received', data.content);

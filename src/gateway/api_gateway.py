@@ -29,8 +29,8 @@ class APIGateway:
         
         # 初始化搜索相关依赖
         from src.skills.search_skills.web_search import WebSearchSkill
-        from src.skills.search_skills.search_judgment import SearchJudgment
         from src.skills.search_skills.search_integration import SearchIntegration
+        from src.skills.decision_skills.multi_layer_decision import MultiLayerDecision
         from src.ai.qiniu_llm import QiniuLLM
         import os
         from dotenv import load_dotenv
@@ -39,9 +39,24 @@ class APIGateway:
         self.api_key = os.getenv('QINIU_AI_API_KEY', os.getenv('QINIU_ACCESS_KEY'))
         
         self.web_search = WebSearchSkill(self.api_key)
-        self.search_judgment = SearchJudgment()
+        self.multi_layer_decision = MultiLayerDecision()
         self.search_integration = SearchIntegration(self.api_key)
         self.llm = QiniuLLM()
+        
+        # 初始化智能判断架构
+        from src.core.resource_registry import create_default_registry
+        from src.core.meta_router import MetaCognitionRouter
+        self.registry = create_default_registry()
+        self.meta_router = MetaCognitionRouter(self.llm, self.registry)
+        
+        # 初始化人设管理模块
+        from src.core.persona_manager import persona_manager
+        self.persona_manager = persona_manager
+        # 加载人设文件
+        if self.persona_manager.load_persona():
+            print("[人设管理] 人设文件加载成功")
+        else:
+            print("[人设管理] 人设文件加载失败，使用默认值")
     
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -124,35 +139,264 @@ class APIGateway:
                 new_chat = self.session_manager.create_session(user_id=user_id)
                 session_id = new_chat["session_id"]
             
+            # 加载会话上下文和记忆管理器
+            session_context = self.session_manager.load_session_context(session_id)
+            memory_manager = session_context.get("memory_manager")
+            
             # 传递用户ID和session_id作为上下文
-            context = {"user_id": user_id, "session_id": session_id, "stream": stream}
+            context = {"user_id": user_id, "session_id": session_id, "stream": stream, "memory_manager": memory_manager}
+            
+            # 首先使用智能判断架构进行决策
+            try:
+                print(f"[智能决策] 开始处理用户输入: {user_input}")
+                decision_result = await self.meta_router.decide(user_input)
+                print(f"[智能决策] 分析结果: {decision_result}")
+                
+                # 执行决策
+                meta_response = await self.meta_router.execute_decision(decision_result, user_input)
+                print(f"[智能决策] 执行结果: {meta_response}")
+                
+                # 如果智能决策返回了直接回答（不是需要搜索的标记）
+                if meta_response != "__NEED_SEARCH__":
+                    # 保存对话历史
+                    self.session_manager.save_conversation_history(
+                        session_id,
+                        user_input,
+                        meta_response
+                    )
+                    
+                    if stream:
+                        async def generate():
+                            # 首先发送会话ID
+                            session_id_data = {"type": "session_id", "content": session_id}
+                            yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 发送智能决策的回答
+                            answer_data = {"type": "answer", "content": meta_response}
+                            yield f"data: {json.dumps(answer_data)}\n\n"
+                            end_data = {"type": "stream_end"}
+                            yield f"data: {json.dumps(end_data)}\n\n"
+                        
+                        return StreamingResponse(generate(), media_type="text/event-stream")
+                    else:
+                        return {
+                            "success": True,
+                            "response": {
+                                "message": meta_response
+                            },
+                            "agent": "meta_cognition",
+                            "session_id": session_id,
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        }
+                else:
+                    print(f"[智能决策] 需要搜索，回退到原有逻辑")
+            except Exception as e:
+                print(f"[智能决策] 执行失败: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # 如果智能决策失败，回退到原有逻辑
+            
+            # 原有逻辑：使用多层决策系统分析查询
+            decision = self.multi_layer_decision.analyze_query(user_input)
+            print(f"[多层决策] 分析结果: {decision}")
+            
+            # 检查是否是简单问题（从知识库直接回答）
+            if decision.get('type') == 'knowledge':
+                knowledge_answer = decision.get('answer', '')
+                
+                # 保存对话历史
+                self.session_manager.save_conversation_history(
+                    session_id,
+                    user_input,
+                    knowledge_answer
+                )
+                
+                if stream:
+                    async def generate():
+                        # 首先发送会话ID
+                        session_id_data = {"type": "session_id", "content": session_id}
+                        yield f"data: {json.dumps(session_id_data)}\n\n"
+                        # 发送知识库回答
+                        answer_data = {"type": "answer", "content": knowledge_answer}
+                        yield f"data: {json.dumps(answer_data)}\n\n"
+                        end_data = {"type": "stream_end"}
+                        yield f"data: {json.dumps(end_data)}\n\n"
+                    
+                    return StreamingResponse(generate(), media_type="text/event-stream")
+                else:
+                    return {
+                        "success": True,
+                        "response": {
+                            "message": knowledge_answer
+                        },
+                        "agent": "knowledge",
+                        "session_id": session_id,
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
             
             # 检查是否需要网络搜索
-            is_search_needed = self.search_judgment.is_search_needed(user_input)
-            print(f"[搜索] 用户查询: {user_input}")
-            print(f"[搜索] 是否需要搜索: {is_search_needed}")
+            is_search_needed = decision.get('need_search', False)
             
-            # 强制对日期相关查询执行搜索
-            date_related_keywords = ["今天是几号", "明天是几号", "今天星期几", "明天星期几", "今年是哪一年", "现在几点了", "几点了", "今天日期", "明天日期", "当前时间", "现在时间", "日期", "时间", "联网搜索"]
-            force_search = any(keyword in user_input for keyword in date_related_keywords)
-            
-            if is_search_needed or force_search:
+            if is_search_needed:
                 # 执行网络搜索
-                search_type = self.search_judgment.get_search_type(user_input)
-                time_filter = self.search_judgment.get_time_filter(user_input)
+                search_type = decision.get('search_type', 'web')
+                time_filter = decision.get('time_filter', None)
                 
                 print(f"[搜索] 搜索类型: {search_type}")
                 print(f"[搜索] 时间过滤: {time_filter}")
-                print(f"[搜索] 强制搜索: {force_search}")
                 
                 # 执行搜索
                 try:
-                    search_result = self.web_search.execute(
-                        user_input,
-                        search_type=search_type,
-                        time_filter=time_filter,
-                        max_retries=3
-                    )
+                    if stream:
+                        async def generate():
+                            # 首先发送会话ID
+                            session_id_data = {"type": "session_id", "content": session_id}
+                            yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 发送正在搜索的状态
+                            searching_data = {"type": "searching", "content": "正在联网搜索..."}
+                            yield f"data: {json.dumps(searching_data)}\n\n"
+                            # 执行搜索
+                            try:
+                                search_result = self.web_search.execute(
+                                    user_input,
+                                    search_type=search_type,
+                                    time_filter=time_filter,
+                                    max_retries=3
+                                )
+                                
+                                if search_result.get("success", False):
+                                    # 整合搜索结果
+                                    integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
+                                    
+                                    # 保存对话历史
+                                    self.session_manager.save_conversation_history(
+                                        session_id,
+                                        user_input,
+                                        integrated_answer
+                                    )
+                                    
+                                    # 发送整合后的回答
+                                    answer_data = {"type": "answer", "content": integrated_answer}
+                                    yield f"data: {json.dumps(answer_data)}\n\n"
+                                else:
+                                    # 搜索失败，获取错误信息
+                                    error_code = search_result.get("error_code", "SEARCH_ERROR")
+                                    error_message = search_result.get("error_message", "搜索失败")
+                                    friendly_message = search_result.get("message", "搜索失败")
+                                    
+                                    print(f"[搜索] 搜索失败: {error_code} - {error_message}")
+                                    
+                                    # 发送搜索失败的状态
+                                    error_data = {"type": "error", "content": friendly_message}
+                                    yield f"data: {json.dumps(error_data)}\n\n"
+                                    # 发送正在生成回答的状态
+                                    generating_data = {"type": "generating", "content": "正在生成回答..."}
+                                    yield f"data: {json.dumps(generating_data)}\n\n"
+                                    # 执行LLM并获取流式生成器
+                                full_answer = ""
+                                async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
+                                    # 发送SSE格式的数据
+                                    yield f"data: {json.dumps(chunk)}\n\n"
+                                    # 收集完整回答
+                                    if chunk.get('type') == 'answer':
+                                        full_answer += chunk.get('content', '')
+                                # 保存对话历史
+                                if full_answer:
+                                    self.session_manager.save_conversation_history(
+                                        session_id,
+                                        user_input,
+                                        full_answer
+                                    )
+                            except Exception as e:
+                                error_message = f"搜索执行异常: {str(e)}"
+                                print(f"[搜索] 执行异常: {error_message}")
+                                # 发送搜索失败的状态
+                                error_data = {"type": "error", "content": "抱歉，搜索服务暂时不可用"}
+                                yield f"data: {json.dumps(error_data)}\n\n"
+                                # 发送正在生成回答的状态
+                                generating_data = {"type": "generating", "content": "正在生成回答..."}
+                                yield f"data: {json.dumps(generating_data)}\n\n"
+                                # 执行LLM并获取流式生成器
+                                full_answer = ""
+                                async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
+                                    # 发送SSE格式的数据
+                                    yield f"data: {json.dumps(chunk)}\n\n"
+                                    # 收集完整回答
+                                    if chunk.get('type') == 'answer':
+                                        full_answer += chunk.get('content', '')
+                                # 保存对话历史
+                                if full_answer:
+                                    self.session_manager.save_conversation_history(
+                                        session_id,
+                                        user_input,
+                                        full_answer
+                                    )
+                            finally:
+                                end_data = {"type": "stream_end"}
+                                yield f"data: {json.dumps(end_data)}\n\n"
+                        
+                        return StreamingResponse(generate(), media_type="text/event-stream")
+                    else:
+                        # 非流式响应
+                        search_result = self.web_search.execute(
+                            user_input,
+                            search_type=search_type,
+                            time_filter=time_filter,
+                            max_retries=3
+                        )
+                        
+                        if search_result.get("success", False):
+                            # 整合搜索结果
+                            integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
+                            
+                            # 保存对话历史
+                            self.session_manager.save_conversation_history(
+                                session_id,
+                                user_input,
+                                integrated_answer
+                            )
+                            
+                            return {
+                                "success": True,
+                                "response": {
+                                    "message": integrated_answer
+                                },
+                                "agent": "web_search",
+                                "session_id": session_id,
+                                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                            }
+                        else:
+                            # 搜索失败，获取错误信息
+                            error_code = search_result.get("error_code", "SEARCH_ERROR")
+                            error_message = search_result.get("error_message", "搜索失败")
+                            friendly_message = search_result.get("message", "搜索失败")
+                            
+                            print(f"[搜索] 搜索失败: {error_code} - {error_message}")
+                            
+                            # 即使搜索失败，也调用LLM提供回答
+                            result = await self.llm.generate_text(user_input, stream=False)
+                            
+                            # 保存对话历史
+                            if result.get("success", False):
+                                self.session_manager.save_conversation_history(
+                                    session_id,
+                                    user_input,
+                                    result.get("text", "")
+                                )
+                            
+                            return {
+                                "success": result.get("success", False),
+                                "response": {
+                                    "message": result.get("text", ""),
+                                    "search_error": {
+                                        "error_code": error_code,
+                                        "error_message": error_message,
+                                        "friendly_message": friendly_message
+                                    }
+                                },
+                                "agent": "llm",
+                                "session_id": session_id,
+                                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                            }
                 except Exception as e:
                     error_message = f"搜索执行异常: {str(e)}"
                     print(f"[搜索] 执行异常: {error_message}")
@@ -169,14 +413,27 @@ class APIGateway:
                             generating_data = {"type": "generating", "content": "正在生成回答..."}
                             yield f"data: {json.dumps(generating_data)}\n\n"
                             # 执行LLM并获取流式生成器
-                            async for chunk in self.llm.generate_text(user_input, stream=True):
+                            full_answer = ""
+                            async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
                                 # 发送SSE格式的数据
                                 yield f"data: {json.dumps(chunk)}\n\n"
+                                # 收集完整回答
+                                if chunk.get('type') == 'answer':
+                                    full_answer += chunk.get('content', '')
+                            # 保存对话历史
+                            if full_answer:
+                                self.session_manager.save_conversation_history(
+                                    session_id,
+                                    user_input,
+                                    full_answer
+                                )
+                            end_data = {"type": "stream_end"}
+                            yield f"data: {json.dumps(end_data)}\n\n"
                         
                         return StreamingResponse(generate(), media_type="text/event-stream")
                     else:
                         # 非流式响应
-                        result = await self.llm.generate_text(user_input, stream=False)
+                        result = await self.llm.generate_text(user_input, stream=False, memory_manager=context.get('memory_manager'))
                         
                         # 保存对话历史
                         if result.get("success", False):
@@ -200,95 +457,6 @@ class APIGateway:
                             "session_id": session_id,
                             "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                         }
-                
-                if search_result.get("success", False):
-                    # 整合搜索结果
-                    integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
-                    
-                    # 保存对话历史
-                    self.session_manager.save_conversation_history(
-                        session_id,
-                        user_input,
-                        integrated_answer
-                    )
-                    
-                    if stream:
-                        async def generate():
-                            # 首先发送会话ID
-                            session_id_data = {"type": "session_id", "content": session_id}
-                            yield f"data: {json.dumps(session_id_data)}\n\n"
-                            # 发送正在搜索的状态
-                            searching_data = {"type": "searching", "content": "正在联网搜索..."}
-                            yield f"data: {json.dumps(searching_data)}\n\n"
-                            # 发送整合后的回答
-                            answer_data = {"type": "answer", "content": integrated_answer}
-                            yield f"data: {json.dumps(answer_data)}\n\n"
-                            end_data = {"type": "stream_end"}
-                            yield f"data: {json.dumps(end_data)}\n\n"
-                        
-                        return StreamingResponse(generate(), media_type="text/event-stream")
-                    else:
-                        return {
-                            "success": True,
-                            "response": {
-                                "message": integrated_answer
-                            },
-                            "agent": "web_search",
-                            "session_id": session_id,
-                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
-                        }
-                else:
-                    # 搜索失败，获取错误信息
-                    error_code = search_result.get("error_code", "SEARCH_ERROR")
-                    error_message = search_result.get("error_message", "搜索失败")
-                    friendly_message = search_result.get("message", "搜索失败")
-                    
-                    print(f"[搜索] 搜索失败: {error_code} - {error_message}")
-                    
-                    # 即使搜索失败，也调用LLM提供回答
-                    if stream:
-                        async def generate():
-                            # 首先发送会话ID
-                            session_id_data = {"type": "session_id", "content": session_id}
-                            yield f"data: {json.dumps(session_id_data)}\n\n"
-                            # 发送搜索失败的状态
-                            error_data = {"type": "error", "content": friendly_message}
-                            yield f"data: {json.dumps(error_data)}\n\n"
-                            # 发送正在生成回答的状态
-                            generating_data = {"type": "generating", "content": "正在生成回答..."}
-                            yield f"data: {json.dumps(generating_data)}\n\n"
-                            # 执行LLM并获取流式生成器
-                            async for chunk in self.llm.generate_text(user_input, stream=True):
-                                # 发送SSE格式的数据
-                                yield f"data: {json.dumps(chunk)}\n\n"
-                        
-                        return StreamingResponse(generate(), media_type="text/event-stream")
-                    else:
-                        # 非流式响应
-                        result = await self.llm.generate_text(user_input, stream=False)
-                        
-                        # 保存对话历史
-                        if result.get("success", False):
-                            self.session_manager.save_conversation_history(
-                                session_id,
-                                user_input,
-                                result.get("text", "")
-                            )
-                        
-                        return {
-                            "success": result.get("success", False),
-                            "response": {
-                                "message": result.get("text", ""),
-                                "search_error": {
-                                    "error_code": error_code,
-                                    "error_message": error_message,
-                                    "friendly_message": friendly_message
-                                }
-                            },
-                            "agent": "llm",
-                            "session_id": session_id,
-                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
-                        }
             else:
                 # 不需要搜索，直接调用LLM
                 if stream:
@@ -297,14 +465,25 @@ class APIGateway:
                         session_id_data = {"type": "session_id", "content": session_id}
                         yield f"data: {json.dumps(session_id_data)}\n\n"
                         # 执行LLM并获取流式生成器
-                        async for chunk in self.llm.generate_text(user_input, stream=True):
+                        full_answer = ""
+                        async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
                             # 发送SSE格式的数据
                             yield f"data: {json.dumps(chunk)}\n\n"
+                            # 收集完整回答
+                            if chunk.get('type') == 'answer':
+                                full_answer += chunk.get('content', '')
+                        # 保存对话历史
+                        if full_answer:
+                            self.session_manager.save_conversation_history(
+                                session_id,
+                                user_input,
+                                full_answer
+                            )
                     
                     return StreamingResponse(generate(), media_type="text/event-stream")
                 else:
                     # 非流式响应
-                    result = await self.llm.generate_text(user_input, stream=False)
+                    result = await self.llm.generate_text(user_input, stream=False, memory_manager=context.get('memory_manager'))
                     
                     # 保存对话历史
                     if result.get("success", False):

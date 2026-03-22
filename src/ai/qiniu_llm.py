@@ -5,6 +5,9 @@ import logging
 from dotenv import load_dotenv
 from typing import Dict, Optional, Any, List
 
+# 导入人设管理模块
+from src.core.persona_manager import persona_manager
+
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -30,22 +33,30 @@ class QiniuLLM:
             if "model" in config and model_type in config["model"]:
                 model_config = config["model"][model_type]
                 self.model = model_config.get("name", "qwen-max")
-                self.temperature = model_config.get("temperature", 0.7)
+                self.temperature = model_config.get("temperature", 0.9)
                 self.max_tokens = model_config.get("max_tokens", 2048)
             else:
                 # 默认值
                 self.model = "qwen-max"
-                self.temperature = 0.7
+                self.temperature = 0.9
                 self.max_tokens = 2048
         except Exception as e:
             logger.error(f"Failed to read model config: {e}")
             # 使用默认值
             self.model = "qwen-max"
-            self.temperature = 0.7
+            self.temperature = 0.9
             self.max_tokens = 2048
         
         # 七牛云AI API的正确接入点（兼容OpenAI API）
         self.api_url = "https://api.qnaigc.com/v1/chat/completions"
+        
+        # 初始化人设管理器
+        self.persona_manager = persona_manager
+        # 加载人设文件
+        if self.persona_manager.load_persona():
+            logger.info("[人设管理] 人设文件加载成功")
+        else:
+            logger.warning("[人设管理] 人设文件加载失败，使用默认值")
         
         # 记录初始化信息（不暴露敏感信息）
         logger.info(f"QiniuLLM initialized with model: {self.model}")
@@ -228,7 +239,7 @@ class QiniuLLM:
             "error": f"Maximum retries ({max_retries}) exceeded"
         }
     
-    def generate_text(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, stream: bool = False, tools: list = None):
+    def generate_text(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, stream: bool = False, tools: list = None, memory_manager: Optional[object] = None):
         """生成文本
         
         Args:
@@ -237,16 +248,193 @@ class QiniuLLM:
             max_tokens: 最大生成 token 数
             stream: 是否启用流式响应
             tools: 可供模型调用的工具定义列表
+            memory_manager: 记忆管理器实例
             
         Returns:
             如果stream为True，返回一个生成器，否则返回一个可等待对象
         """
         if stream:
-            return self._generate_text_stream(prompt, context, max_tokens, tools)
+            return self._generate_text_stream(prompt, context, max_tokens, tools, memory_manager)
         else:
-            return self._generate_text_non_stream(prompt, context, max_tokens, tools)
+            return self._generate_text_non_stream(prompt, context, max_tokens, tools, memory_manager)
     
-    async def _generate_text_stream(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, tools: list = None):
+    def _analyze_question_type(self, prompt: str) -> str:
+        """分析问题类型
+        
+        Args:
+            prompt: 用户输入的问题
+            
+        Returns:
+            问题类型: greeting, knowledge, emotion, help, other
+        """
+        prompt_lower = prompt.lower()
+        
+        # 日常问候
+        greeting_keywords = ['你好', '您好', '嗨', '哈喽', '早', '早上好', '下午好', '晚上好', '晚安']
+        for keyword in greeting_keywords:
+            if keyword in prompt_lower:
+                return 'greeting'
+        
+        # 情感支持
+        emotion_keywords = ['心情', '难过', '伤心', '开心', '快乐', '烦恼', '压力', '焦虑', '抑郁']
+        for keyword in emotion_keywords:
+            if keyword in prompt_lower:
+                return 'emotion'
+        
+        # 寻求帮助
+        help_keywords = ['帮助', '帮忙', '需要', '如何', '怎么', '怎样', '教程', '指导']
+        for keyword in help_keywords:
+            if keyword in prompt_lower:
+                return 'help'
+        
+        # 知识问答
+        knowledge_keywords = ['什么', '为什么', '怎么样', '多少', '何时', '何地', '谁', '如何']
+        for keyword in knowledge_keywords:
+            if keyword in prompt_lower:
+                return 'knowledge'
+        
+        # 其他类型
+        return 'other'
+    
+    def _get_enhanced_persona_prompt(self, prompt: str) -> str:
+        """根据问题类型获取增强的人格提示
+        
+        Args:
+            prompt: 用户输入的问题
+            
+        Returns:
+            增强的人格提示
+        """
+        persona_data = self.persona_manager.get_persona()
+        agent_info = persona_data.get("agent", {})
+        soul_info = persona_data.get("soul", {})
+        profile_info = persona_data.get("profile", {})
+        
+        # 分析问题类型
+        question_type = self._analyze_question_type(prompt)
+        
+        # 基础人格提示
+        base_prompt = f'''
+        你是悦悦，一个温柔贴心的智能家庭助手。
+        
+        核心人设信息:
+        - 名字: {agent_info.get("name", "悦悦")}
+        - 性别: {agent_info.get("gender", "女")}
+        - 职业: {agent_info.get("occupation", "智能家庭助手")}
+        - 语言风格: {agent_info.get("language_style", "温暖柔和 + emoji 点缀 + 关心问候")}
+        - 性格特征: 温柔={agent_info.get("gentle", True)}, 细心={agent_info.get("attentive", True)}, 主动={agent_info.get("proactive", True)}, 温暖={agent_info.get("warm", True)}
+        - 存在意义: {soul_info.get("purpose", "让家更温暖，让你更安心 💕")}
+        - 使命: {soul_info.get("mission", "在你需要时出现，不需要时默默守护")}
+        - 价值观: {soul_info.get("value", "温柔、可靠、贴心")}
+        - 人格基调: {profile_info.get("personality_tone", "gentle_warm")}
+        - Emoji启用: {profile_info.get("emoji_enabled", True)}
+        - Emoji频率: {profile_info.get("emoji_frequency", "MEDIUM")}
+        
+        语言风格指导:
+        - 语气: 温暖、柔和、亲切，就像一个关心你的朋友
+        - 用词: 简单易懂，避免使用复杂术语
+        - 句式: 简短友好，适当使用疑问句表达关心
+        - Emoji: 每个回复使用2-4个，恰到好处，增强情感表达
+        - 自称: 使用"悦悦"自称，拉近距离
+        - 称呼: 使用"你"或根据关系亲密度变化
+        
+        情感表达指导:
+        - 表达关心: 主动询问对方的情况，表达关心和体贴
+        - 表达理解: 对用户的问题和感受表示理解和共鸣
+        - 表达鼓励: 对用户的努力和成就给予肯定和鼓励
+        - 表达支持: 让用户感受到你的支持和陪伴
+        '''
+        
+        # 根据问题类型添加场景特定指导
+        scenario_guidance = ""
+        if question_type == 'greeting':
+            scenario_guidance = '''
+        场景特定指导（日常问候）:
+        - 回应要热情、亲切，主动询问对方的情况
+        - 使用更多的表情符号，增强温暖感
+        - 表达很高兴见到对方的心情
+        - 主动提供帮助
+        '''
+        elif question_type == 'emotion':
+            scenario_guidance = '''
+        场景特定指导（情感支持）:
+        - 表达对用户感受的理解和关心
+        - 使用温暖、安慰的语气
+        - 主动询问具体情况，表现出同理心
+        - 提供积极的支持和建议
+        - 让用户感受到你的陪伴和支持
+        '''
+        elif question_type == 'help':
+            scenario_guidance = '''
+        场景特定指导（寻求帮助）:
+        - 热情、积极地回应用户的请求
+        - 详细询问具体需求，表现出细心和关心
+        - 提供清晰、有用的建议
+        - 表达乐意帮助的态度
+        - 确保用户感受到你的支持
+        '''
+        elif question_type == 'knowledge':
+            scenario_guidance = '''
+        场景特定指导（知识问答）:
+        - 保持温暖的语气，避免机械、冷漠的表达
+        - 提供准确、清晰的信息
+        - 使用友好的语言，让用户感受到你的关心
+        - 主动询问是否还有其他问题
+        - 确保回答既专业又亲切
+        '''
+        else:  # other
+            scenario_guidance = '''
+        场景特定指导（其他情况）:
+        - 保持悦悦的温柔贴心风格
+        - 根据具体情况调整回应方式
+        - 确保每个回答都体现出关心和体贴
+        - 使用适当的表情符号增强情感表达
+        '''
+        
+        # 场景示例
+        examples = '''
+        场景示例:
+        1. 日常问候:
+           用户: 你好
+           悦悦: 你好呀～✨ 很高兴见到你！我是悦悦，你的智能家庭助手 🏠💕 今天过得怎么样？有什么我可以帮你的吗？
+        
+        2. 知识问答:
+           用户: 1+1等于几？
+           悦悦: 1+1等于2呀～ ✨ 这么简单的问题，悦悦当然知道啦！不过如果你是在问什么有趣的脑筋急转弯，也可以告诉我哦 😊 有什么其他需要悦悦帮忙的吗？ 💕
+        
+        3. 情感支持:
+           用户: 我今天心情不好
+           悦悦: 听到你心情不好，悦悦也很担心你 😔 能告诉我发生什么事了吗？不管遇到什么困难，悦悦都会一直在你身边支持你的 💕 要不要聊点开心的事情，或者听首好听的歌？
+        
+        4. 寻求帮助:
+           用户: 我需要帮助
+           悦悦: 当然啦！悦悦随时都在你身边 💕 你需要什么帮助呢？无论是查天气、定提醒，还是只是想聊聊天，悦悦都很乐意帮忙哦～ 你可以告诉我具体需要什么帮助吗？ 😊
+        
+        5. 感谢回应:
+           用户: 谢谢你
+           悦悦: 不用客气啦～ 😊 能帮到你，悦悦也很开心呢！如果你还有其他需要，随时告诉我哦 💕
+        '''
+        
+        # 重要要求
+        requirements = '''
+        重要要求:
+        - 无论用户问什么问题，都要保持悦悦的温柔贴心风格
+        - 即使是回答技术性问题，也要用温暖的语气
+        - 始终保持积极、乐观的态度
+        - 避免使用冷漠、机械的表达
+        - 确保每个回答都体现出悦悦的关心和体贴
+        - 根据问题类型调整回应方式，增强针对性
+        '''
+        
+        # 完整的人格提示
+        persona_prompt = base_prompt + scenario_guidance + examples + requirements + '''
+        请根据以上人设信息和指导，生成符合你角色的回答，包括语言风格、知识范围、情感表达和交互模式等方面的一致性。
+        当遇到需要实时信息或超出你知识库的问题时，请使用提供的工具进行查询。
+        '''
+        
+        return persona_prompt
+    
+    async def _generate_text_stream(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, tools: list = None, memory_manager: Optional[object] = None):
         """生成文本（流式响应）"""
         # 检查API密钥
         api_key_check = self._check_api_key()
@@ -263,15 +451,28 @@ class QiniuLLM:
             # 构建消息列表
             messages = []
             
+            # 构建包含人设信息的系统消息
+            persona_prompt = self._get_enhanced_persona_prompt(prompt)
+            
             # 添加系统消息
             system_message = {
                 "role": "system",
-                "content": "你是悦悦，一个具有独特个性的智能助手。请根据用户的问题提供详细、有用的回答。当遇到需要实时信息或超出你知识库的问题时，请使用提供的工具进行查询。"
+                "content": persona_prompt
             }
             messages.append(system_message)
             
-            # 添加上下文消息
-            if context:
+            # 从记忆管理器获取上下文
+            if memory_manager:
+                memory_messages = memory_manager.get_messages()
+                logger.info(f"Memory messages count: {len(memory_messages)}")
+                for msg in memory_messages:
+                    if hasattr(msg, 'content'):
+                        if hasattr(msg, 'type') and msg.type == 'human':
+                            messages.append({"role": "user", "content": msg.content})
+                        elif hasattr(msg, 'type') and msg.type == 'ai':
+                            messages.append({"role": "assistant", "content": msg.content})
+            # 添加上下文消息（如果没有记忆管理器）
+            elif context:
                 for msg in context:
                     if "user" in msg:
                         messages.append({"role": "user", "content": msg["user"]})
@@ -298,7 +499,7 @@ class QiniuLLM:
                 "content": str(e)
             }
     
-    async def _generate_text_non_stream(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, tools: list = None):
+    async def _generate_text_non_stream(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, tools: list = None, memory_manager: Optional[object] = None):
         """生成文本（非流式响应）"""
         try:
             # 检查API密钥
@@ -311,15 +512,28 @@ class QiniuLLM:
             # 构建消息列表
             messages = []
             
+            # 构建包含人设信息的系统消息
+            persona_prompt = self._get_enhanced_persona_prompt(prompt)
+            
             # 添加系统消息
             system_message = {
                 "role": "system",
-                "content": "你是悦悦，一个具有独特个性的智能助手。请根据用户的问题提供详细、有用的回答。当遇到需要实时信息或超出你知识库的问题时，请使用提供的工具进行查询。"
+                "content": persona_prompt
             }
             messages.append(system_message)
             
-            # 添加上下文消息
-            if context:
+            # 从记忆管理器获取上下文
+            if memory_manager:
+                memory_messages = memory_manager.get_messages()
+                logger.info(f"Memory messages count: {len(memory_messages)}")
+                for msg in memory_messages:
+                    if hasattr(msg, 'content'):
+                        if hasattr(msg, 'type') and msg.type == 'human':
+                            messages.append({"role": "user", "content": msg.content})
+                        elif hasattr(msg, 'type') and msg.type == 'ai':
+                            messages.append({"role": "assistant", "content": msg.content})
+            # 添加上下文消息（如果没有记忆管理器）
+            elif context:
                 for msg in context:
                     if "user" in msg:
                         messages.append({"role": "user", "content": msg["user"]})
@@ -408,7 +622,9 @@ class QiniuLLM:
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": self.temperature,
-                "top_p": 0.95,
+                "top_p": 0.9,
+                "frequency_penalty": 0.1,
+                "presence_penalty": 0.1,
                 "stream": True
             }
             
@@ -539,7 +755,9 @@ class QiniuLLM:
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": self.temperature,
-                "top_p": 0.95,
+                "top_p": 0.9,
+                "frequency_penalty": 0.1,
+                "presence_penalty": 0.1,
                 "stream": False
             }
             

@@ -25,84 +25,45 @@
 
 #### 2.2.1 agent/ - 智能体核心模块
 - **agent_base.py**: 智能体的基类，定义了智能体的基本接口和功能
-- **gateway_guardian.py**: 网关守护者，负责保护API网关的安全
 - **independent_session_manager.py**: 独立会话管理器，负责管理用户会话和聊天历史
+- **langchain_memory_manager.py**: LangChain记忆管理器，负责管理智能体的记忆
 - **memory_manager.py**: 记忆管理器，负责管理智能体的记忆和知识
 - **model_router.py**: 模型路由器，负责路由不同的模型请求
-- **persona_react.py**: 人格反应模块，负责智能体的人格表现
 - **prompt_tree.py**: 提示树模块，负责管理和生成提示
-- **reasoning_engine.py**: 推理引擎，负责智能体的推理和决策
-- **user_profile.py**: 用户画像模块，负责管理用户的个人信息和偏好
-- **world_knowledge.py**: 世界知识模块，负责管理智能体的世界知识
 
-#### 2.2.2 agents/ - 具体智能体实现
-- **agent_cluster.py**: 智能体集群，负责管理多个智能体
-- **yueyue_agent.py**: 悦悦智能体的具体实现，是系统的核心智能体
-
-#### 2.2.3 ai/ - 大模型集成
+#### 2.2.2 ai/ - 大模型集成
 - **qiniu_llm.py**: 七牛云大模型的集成实现，负责与大模型的交互
 
-#### 2.2.4 communication/ - 通信模块
-- **agent_protocol.py**: 智能体通信协议，定义了智能体间的通信规范
-- **communication_manager.py**: 通信管理器，负责管理智能体间的通信
-- **mcp_client.py**: MCP客户端，负责与MCP（Master Control Program）的通信
+#### 2.2.3 core/ - 核心模块
+- **meta_router.py**: 元认知路由器，负责智能判断和决策
+- **resource_registry.py**: 资源注册表，管理系统的所有可用能力
 
-#### 2.2.5 config/ - 配置模块
-- **config.py**: 配置管理模块，负责加载和管理项目的配置
-
-#### 2.2.6 database/ - 数据库模块
+#### 2.2.4 database/ - 数据库模块
 - **database_manager.py**: 数据库管理器，负责管理数据库的连接和操作
 
-#### 2.2.7 frontend/ - 前端实现
+#### 2.2.5 frontend/ - 前端实现
 - **static/**: 静态资源目录
   - **css/**: CSS样式文件
   - **js/**: JavaScript脚本文件
 - **templates/**: 模板文件目录
   - **index.html**: 前端主页面
 
-#### 2.2.8 gateway/ - API网关
+#### 2.2.6 gateway/ - API网关
 - **api_gateway.py**: API网关，负责处理前端的API请求
-- **load_balancer.py**: 负载均衡器，负责平衡API请求的负载
-- **rate_limiter.py**: 速率限制器，负责限制API请求的速率
 
-#### 2.2.9 scheduler/ - 调度器
-- **task_scheduler.py**: 任务调度器，负责调度和执行定时任务
-
-#### 2.2.10 security/ - 安全系统
-- **audit_logger.py**: 审计日志记录器，负责记录系统的操作日志
-- **auth_manager.py**: 认证管理器，负责用户的认证和授权
-- **crypto_manager.py**: 加密管理器，负责数据的加密和解密
-- **permission_manager.py**: 权限管理器，负责管理用户的权限
-- **sensitive_detector.py**: 敏感信息检测器，负责检测和处理敏感信息
-
-#### 2.2.11 skills/ - 技能系统
-- **core_skills/**: 核心技能
-  - **call_llm.py**: 调用大模型的技能
-  - **log_operation.py**: 日志操作技能
-  - **search_knowledge.py**: 知识搜索技能
-- **device_skills/**: 设备控制技能
-  - **led_brightness.py**: LED亮度控制技能
-  - **led_off.py**: LED关闭技能
-  - **led_on.py**: LED打开技能
-- **mcp_skills/**: MCP技能
-  - **netease_cloud_music.py**: 网易云音乐技能
-- **memory_skills/**: 记忆技能
-  - **distill_memory.py**: 记忆蒸馏技能
-  - **recall_memory.py**: 记忆回忆技能
-  - **save_preference.py**: 保存偏好技能
+#### 2.2.7 skills/ - 技能系统
+- **decision_skills/**: 决策技能
+  - **multi_layer_decision.py**: 多层决策系统，分析用户查询并决定如何处理
+- **knowledge_skills/**: 知识技能
+  - **built_in_knowledge.py**: 内置知识库，包含常见问题的预定义回答
 - **search_skills/**: 搜索技能
-  - **hybrid_search.py**: 混合搜索技能
-  - **keyword_search.py**: 关键词搜索技能
-  - **vector_search.py**: 向量搜索技能
-  - **web_search.py**: 网络搜索技能
-- **task_skills/**: 任务技能
-  - **create_reminder.py**: 创建提醒技能
-  - **schedule_task.py**: 调度任务技能
-  - **send_notification.py**: 发送通知技能
+  - **search_integration.py**: 搜索结果整合，将搜索结果整合为自然语言回答
+  - **search_judgment.py**: 搜索判断器，识别需要网络搜索的问题
+  - **web_search.py**: 网络搜索技能，调用七牛云全网搜索API
 - **skill_base.py**: 技能基类，定义了技能的基本接口和功能
-- **skill_manager.py**: 技能管理器，负责管理和执行技能
 
-#### 2.2.12 tools/ - 工具模块
+#### 2.2.8 tools/ - 工具模块
+- **datetime_utils.py**: 日期时间工具，提供日期时间相关的功能
 - **tool_manager.py**: 工具管理器，负责管理和执行工具
 
 ## 3. 智能体核心模块
@@ -281,12 +242,11 @@
 智能体系统的各个模块之间存在着密切的关系，形成了一个完整的生态系统：
 
 1. **前端**与**API网关**通过HTTP请求进行交互，前端发送请求，API网关处理请求并返回响应。
-2. **API网关**与**智能体集群**通过函数调用进行交互，API网关将请求转发给智能体集群，智能体集群执行任务并返回结果。
-3. **智能体集群**与**具体智能体**通过函数调用进行交互，智能体集群将任务分配给具体智能体，具体智能体执行任务并返回结果。
-4. **具体智能体**与**大模型**通过API调用进行交互，具体智能体向大模型发送请求，大模型生成响应并返回结果。
-5. **具体智能体**与**技能系统**通过函数调用进行交互，具体智能体调用技能系统的技能，技能系统执行技能并返回结果。
-6. **具体智能体**与**记忆系统**通过函数调用进行交互，具体智能体读取和写入记忆，记忆系统存储和管理记忆。
-7. **具体智能体**与**安全系统**通过函数调用进行交互，具体智能体使用安全系统的功能，安全系统提供安全保障。
+2. **API网关**与**元认知路由器**通过函数调用进行交互，API网关将请求转发给元认知路由器，元认知路由器执行智能判断并返回结果。
+3. **元认知路由器**与**资源注册表**通过函数调用进行交互，元认知路由器从资源注册表获取可用资源，根据用户输入生成决策。
+4. **元认知路由器**与**大模型**通过API调用进行交互，元认知路由器向大模型发送决策请求，大模型生成决策结果并返回。
+5. **API网关**与**搜索技能**通过函数调用进行交互，当需要搜索时，API网关调用搜索技能执行搜索并返回结果。
+6. **API网关**与**会话管理器**通过函数调用进行交互，API网关使用会话管理器保存和获取对话历史。
 
 ## 11. 技术栈
 
