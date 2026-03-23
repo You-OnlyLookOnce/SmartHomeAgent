@@ -9,11 +9,12 @@ class PersonaValidator:
         """初始化人设验证器"""
         self.persona_manager = persona_manager
     
-    def validate(self, content: str) -> Dict[str, Any]:
+    def validate(self, content: str, scene: str = "") -> Dict[str, Any]:
         """验证生成的内容是否符合人设要求
         
         Args:
             content: 生成的内容
+            scene: 场景类型
             
         Returns:
             验证结果，包含是否通过和详细信息
@@ -31,6 +32,9 @@ class PersonaValidator:
             "score": 1.0
         }
         
+        # 指令场景的验证标准可以适当放宽
+        is_instruction = scene == "instruction"
+        
         # 验证语言风格
         language_style = agent_info.get("language_style", "温暖柔和 + emoji 点缀 + 关心问候")
         if "温暖柔和" in language_style:
@@ -43,34 +47,35 @@ class PersonaValidator:
                     result["score"] -= 0.2
         
         # 验证Emoji使用
-        emoji_enabled = profile_info.get("emoji_enabled", True)
-        emoji_frequency = profile_info.get("emoji_frequency", "MEDIUM")
-        
-        if emoji_enabled:
-            # 计算Emoji数量
-            emoji_count = len(re.findall(r"[\u2600-\u27BF\u1F300-\u1F64F\u1F680-\u1F6FF]", content))
+        if not is_instruction:
+            emoji_enabled = profile_info.get("emoji_enabled", True)
+            emoji_frequency = profile_info.get("emoji_frequency", "MEDIUM")
             
-            if emoji_frequency == "LOW":
-                if emoji_count > 2:
+            if emoji_enabled:
+                # 计算Emoji数量
+                emoji_count = len(re.findall(r"[\u2600-\u27BF\u1F300-\u1F64F\u1F680-\u1F6FF]", content))
+                
+                if emoji_frequency == "LOW":
+                    if emoji_count > 2:
+                        result["passed"] = False
+                        result["issues"].append("Emoji使用过多：应该使用较少的Emoji")
+                        result["score"] -= 0.1
+                elif emoji_frequency == "MEDIUM":
+                    if emoji_count > 4:
+                        result["passed"] = False
+                        result["issues"].append("Emoji使用过多：应该使用适中的Emoji")
+                        result["score"] -= 0.1
+                elif emoji_frequency == "HIGH":
+                    if emoji_count < 2:
+                        result["passed"] = False
+                        result["issues"].append("Emoji使用过少：应该使用较多的Emoji")
+                        result["score"] -= 0.1
+            else:
+                # 检查是否使用了Emoji
+                if re.search(r"[\u2600-\u27BF\u1F300-\u1F64F\u1F680-\u1F6FF]", content):
                     result["passed"] = False
-                    result["issues"].append("Emoji使用过多：应该使用较少的Emoji")
+                    result["issues"].append("Emoji使用不符合人设：不应该使用Emoji")
                     result["score"] -= 0.1
-            elif emoji_frequency == "MEDIUM":
-                if emoji_count > 4:
-                    result["passed"] = False
-                    result["issues"].append("Emoji使用过多：应该使用适中的Emoji")
-                    result["score"] -= 0.1
-            elif emoji_frequency == "HIGH":
-                if emoji_count < 2:
-                    result["passed"] = False
-                    result["issues"].append("Emoji使用过少：应该使用较多的Emoji")
-                    result["score"] -= 0.1
-        else:
-            # 检查是否使用了Emoji
-            if re.search(r"[\u2600-\u27BF\u1F300-\u1F64F\u1F680-\u1F6FF]", content):
-                result["passed"] = False
-                result["issues"].append("Emoji使用不符合人设：不应该使用Emoji")
-                result["score"] -= 0.1
         
         # 验证性格特征
         is_gentle = soul_info.get("is_gentle", True)
@@ -84,7 +89,7 @@ class PersonaValidator:
                     result["score"] -= 0.2
         
         is_attentive = soul_info.get("is_attentive", True)
-        if is_attentive:
+        if is_attentive and not is_instruction:
             # 检查是否有关心的表达
             caring_patterns = [r"怎么样", r"还好吗", r"需要帮忙", r"有什么可以"]
             if not any(re.search(pattern, content) for pattern in caring_patterns):
@@ -92,7 +97,7 @@ class PersonaValidator:
                 result["score"] -= 0.1
         
         is_caring = soul_info.get("is_caring", True)
-        if is_caring:
+        if is_caring and not is_instruction:
             # 检查是否有贴心的表达
             caring_patterns = [r"照顾", r"关心", r"陪伴", r"支持"]
             if not any(re.search(pattern, content) for pattern in caring_patterns):
@@ -120,13 +125,14 @@ class PersonaValidator:
                     result["score"] -= 0.2
         
         # 验证人格基调
-        personality_tone = profile_info.get("personality_tone", "gentle_warm")
-        if personality_tone == "gentle_warm":
-            # 检查是否使用了温暖的语言
-            warm_patterns = [r"温暖", r"贴心", r"关心", r"陪伴"]
-            if not any(re.search(pattern, content) for pattern in warm_patterns):
-                result["issues"].append("人格基调不符合人设：缺少温暖的表达")
-                result["score"] -= 0.1
+        if not is_instruction:
+            personality_tone = profile_info.get("personality_tone", "gentle_warm")
+            if personality_tone == "gentle_warm":
+                # 检查是否使用了温暖的语言
+                warm_patterns = [r"温暖", r"贴心", r"关心", r"陪伴"]
+                if not any(re.search(pattern, content) for pattern in warm_patterns):
+                    result["issues"].append("人格基调不符合人设：缺少温暖的表达")
+                    result["score"] -= 0.1
         
         # 确保评分在 0-1 之间
         result["score"] = max(0.0, min(1.0, result["score"]))

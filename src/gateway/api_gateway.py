@@ -57,6 +57,10 @@ class APIGateway:
             print("[人设管理] 人设文件加载成功")
         else:
             print("[人设管理] 人设文件加载失败，使用默认值")
+        
+        # 初始化人格表达优化器
+        from src.core.persona_expression_optimizer import persona_optimizer
+        self.persona_optimizer = persona_optimizer
     
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -170,18 +174,22 @@ class APIGateway:
                             # 首先发送会话ID
                             session_id_data = {"type": "session_id", "content": session_id}
                             yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 优化回答的人格表达
+                            optimized_response = await self.persona_optimizer.optimize_expression_async(meta_response, user_input)
                             # 发送智能决策的回答
-                            answer_data = {"type": "answer", "content": meta_response}
+                            answer_data = {"type": "answer", "content": optimized_response}
                             yield f"data: {json.dumps(answer_data)}\n\n"
                             end_data = {"type": "stream_end"}
                             yield f"data: {json.dumps(end_data)}\n\n"
                         
                         return StreamingResponse(generate(), media_type="text/event-stream")
                     else:
+                        # 优化回答的人格表达
+                        optimized_response = await self.persona_optimizer.optimize_expression_async(meta_response, user_input)
                         return {
                             "success": True,
                             "response": {
-                                "message": meta_response
+                                "message": optimized_response
                             },
                             "agent": "meta_cognition",
                             "session_id": session_id,
@@ -215,18 +223,22 @@ class APIGateway:
                         # 首先发送会话ID
                         session_id_data = {"type": "session_id", "content": session_id}
                         yield f"data: {json.dumps(session_id_data)}\n\n"
+                        # 优化回答的人格表达
+                        optimized_answer = await self.persona_optimizer.optimize_expression_async(knowledge_answer, user_input)
                         # 发送知识库回答
-                        answer_data = {"type": "answer", "content": knowledge_answer}
+                        answer_data = {"type": "answer", "content": optimized_answer}
                         yield f"data: {json.dumps(answer_data)}\n\n"
                         end_data = {"type": "stream_end"}
                         yield f"data: {json.dumps(end_data)}\n\n"
                     
                     return StreamingResponse(generate(), media_type="text/event-stream")
                 else:
+                    # 优化回答的人格表达
+                    optimized_answer = await self.persona_optimizer.optimize_expression_async(knowledge_answer, user_input)
                     return {
                         "success": True,
                         "response": {
-                            "message": knowledge_answer
+                            "message": optimized_answer
                         },
                         "agent": "knowledge",
                         "session_id": session_id,
@@ -274,8 +286,10 @@ class APIGateway:
                                         integrated_answer
                                     )
                                     
+                                    # 优化回答的人格表达
+                                    optimized_answer = await self.persona_optimizer.optimize_expression_async(integrated_answer, user_input)
                                     # 发送整合后的回答
-                                    answer_data = {"type": "answer", "content": integrated_answer}
+                                    answer_data = {"type": "answer", "content": optimized_answer}
                                     yield f"data: {json.dumps(answer_data)}\n\n"
                                 else:
                                     # 搜索失败，获取错误信息
@@ -294,6 +308,10 @@ class APIGateway:
                                     # 执行LLM并获取流式生成器
                                 full_answer = ""
                                 async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
+                                    # 优化回答的人格表达
+                                    if chunk.get('type') == 'answer':
+                                        optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
+                                        chunk['content'] = optimized_content
                                     # 发送SSE格式的数据
                                     yield f"data: {json.dumps(chunk)}\n\n"
                                     # 收集完整回答
@@ -318,6 +336,10 @@ class APIGateway:
                                 # 执行LLM并获取流式生成器
                                 full_answer = ""
                                 async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
+                                    # 优化回答的人格表达
+                                    if chunk.get('type') == 'answer':
+                                        optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
+                                        chunk['content'] = optimized_content
                                     # 发送SSE格式的数据
                                     yield f"data: {json.dumps(chunk)}\n\n"
                                     # 收集完整回答
@@ -355,10 +377,12 @@ class APIGateway:
                                 integrated_answer
                             )
                             
+                            # 优化回答的人格表达
+                            optimized_answer = await self.persona_optimizer.optimize_expression_async(integrated_answer, user_input)
                             return {
                                 "success": True,
                                 "response": {
-                                    "message": integrated_answer
+                                    "message": optimized_answer
                                 },
                                 "agent": "web_search",
                                 "session_id": session_id,
@@ -383,10 +407,12 @@ class APIGateway:
                                     result.get("text", "")
                                 )
                             
+                            # 优化回答的人格表达
+                            optimized_text = await self.persona_optimizer.optimize_expression_async(result.get("text", ""), user_input)
                             return {
                                 "success": result.get("success", False),
                                 "response": {
-                                    "message": result.get("text", ""),
+                                    "message": optimized_text,
                                     "search_error": {
                                         "error_code": error_code,
                                         "error_message": error_message,
@@ -443,10 +469,12 @@ class APIGateway:
                                 result.get("text", "")
                             )
                         
+                        # 优化回答的人格表达
+                        optimized_text = await self.persona_optimizer.optimize_expression_async(result.get("text", ""), user_input)
                         return {
                             "success": result.get("success", False),
                             "response": {
-                                "message": result.get("text", ""),
+                                "message": optimized_text,
                                 "search_error": {
                                     "error_code": "EXECUTION_ERROR",
                                     "error_message": error_message,
@@ -467,6 +495,10 @@ class APIGateway:
                         # 执行LLM并获取流式生成器
                         full_answer = ""
                         async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
+                            # 优化回答的人格表达
+                            if chunk.get('type') == 'answer':
+                                optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
+                                chunk['content'] = optimized_content
                             # 发送SSE格式的数据
                             yield f"data: {json.dumps(chunk)}\n\n"
                             # 收集完整回答
@@ -493,10 +525,12 @@ class APIGateway:
                             result.get("text", "")
                         )
                     
+                    # 优化回答的人格表达
+                    optimized_text = await self.persona_optimizer.optimize_expression_async(result.get("text", ""), user_input)
                     return {
                         "success": result.get("success", False),
                         "response": {
-                            "message": result.get("text", "")
+                            "message": optimized_text
                         },
                         "agent": "llm",
                         "session_id": session_id,
