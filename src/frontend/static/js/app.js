@@ -26,84 +26,14 @@ let currentSessionId = null;
 const windowId = 'window_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 // 是否正在进行流式响应
 let isStreaming = false;
+// 搜索相关变量
+let searchTimeout = null;
+let chatHistory = [];
 console.log('窗口唯一标识符:', windowId);
 
 // 初始化函数将在后面定义
 
-// 绑定侧边栏导航事件
-function bindSidebarNavigation() {
-    const navItems = document.querySelectorAll('.nav-item');
-    const contentSections = document.querySelectorAll('.content-section');
-    const sectionTitle = document.getElementById('section-title');
-    
-    navItems.forEach(item => {
-        item.addEventListener('click', () => {
-            const section = item.getAttribute('data-section');
-            
-            // 保存当前会话ID到本地存储，无论切换到哪个视图
-            if (currentSessionId) {
-                localStorage.setItem(`currentSessionId_${windowId}`, currentSessionId);
-                console.log('保存会话ID到本地存储:', currentSessionId);
-            }
-            
-            // 更新导航项状态
-            navItems.forEach(nav => nav.classList.remove('active'));
-            item.classList.add('active');
-            
-            // 更新内容区域
-            contentSections.forEach(sec => sec.classList.remove('active'));
-            document.getElementById(`${section}-section`).classList.add('active');
-            
-            // 更新标题
-            if (sectionTitle) {
-                const titles = {
-                    'chat': '聊天',
-                    'device': '设备控制',
-                    'task': '任务管理',
-                    'memory': '记忆管理',
-                    'scheduler': '定时任务',
-                    'distillation': '记忆蒸馏',
-                    'status': '系统状态'
-                };
-                sectionTitle.textContent = titles[section] || '聊天';
-            }
-            
-            // 隐藏聊天初始化界面
-            hideInitializationUI();
-            
-            // 加载对应模块的内容
-            if (section === 'memory') {
-                loadMemoryFiles();
-            } else if (section === 'scheduler') {
-                loadScheduleList();
-            } else if (section === 'task') {
-                loadTasks();
-            } else if (section === 'chat') {
-                // 尝试从本地存储恢复会话ID
-                const savedSessionId = localStorage.getItem(`currentSessionId_${windowId}`);
-                if (savedSessionId) {
-                    currentSessionId = savedSessionId;
-                    console.log('从本地存储恢复会话ID:', currentSessionId);
-                }
-                
-                // 如果有当前会话，显示对应对话
-                if (currentSessionId) {
-                    // 不再自动重新加载对话历史，避免新消息被覆盖
-                    // 只有在切换到不同对话时才需要重新加载
-                    console.log('切换到聊天界面，保持当前对话内容');
-                    // 确保聊天区域可见
-                    if (chatArea) {
-                        chatArea.style.display = 'block';
-                    }
-                    hideInitializationUI();
-                } else {
-                    // 没有会话时显示初始化界面
-                    showInitializationUI();
-                }
-            }
-        });
-    });
-}
+
 
 // 切换到聊天界面
 function switchToChatSection() {
@@ -766,12 +696,22 @@ function init() {
     }
     
     // 绑定事件
-    sendBtn.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            sendMessage();
-        }
-    });
+    if (sendBtn) {
+        sendBtn.addEventListener('click', sendMessage);
+        console.log('发送按钮事件绑定成功');
+    } else {
+        console.error('发送按钮未找到');
+    }
+    if (messageInput) {
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        console.log('输入框回车键事件绑定成功');
+    } else {
+        console.error('输入框未找到');
+    }
     
     // 对话管理事件
     console.log('newChatBtn:', newChatBtn);
@@ -859,6 +799,9 @@ function init() {
     // 绑定新功能模块的事件
     bindNewModuleEvents();
     
+    // 绑定搜索事件
+    bindSearchEvents();
+    
     // 加载对话列表
     loadChats();
     
@@ -879,6 +822,646 @@ function init() {
             console.log('当前没有活跃会话');
         }
     });
+}
+
+// 显示通知消息
+function showNotification(message, type = 'info') {
+    // 创建通知元素
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    
+    // 添加到页面
+    document.body.appendChild(notification);
+    
+    // 显示动画
+    setTimeout(() => {
+        notification.classList.add('show');
+    }, 10);
+    
+    // 3秒后自动消失
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => {
+            document.body.removeChild(notification);
+        }, 300);
+    }, 3000);
+}
+
+// 备忘录相关函数
+
+// 全局变量用于存储备忘录数据和当前筛选状态
+let allMemos = [];
+let currentFilter = { category: 'all', sortBy: 'updated_at', sortOrder: 'desc' };
+
+// 加载备忘录列表
+async function loadMemos() {
+    try {
+        const response = await fetch('/api/memos', {
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        if (!response.ok) {
+            throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            allMemos = data.memos;
+            applyFilters();
+        } else {
+            showNotification('加载备忘录失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('加载备忘录失败:', error);
+        showNotification('加载备忘录失败，请检查网络连接后重试', 'error');
+    }
+}
+
+// 应用筛选和排序
+function applyFilters() {
+    let filteredMemos = [...allMemos];
+    
+    // 按分类筛选
+    if (currentFilter.category !== 'all') {
+        filteredMemos = filteredMemos.filter(memo => memo.category === currentFilter.category);
+    }
+    
+    // 排序
+    filteredMemos.sort((a, b) => {
+        if (currentFilter.sortBy === 'updated_at') {
+            const dateA = new Date(a.updated_at);
+            const dateB = new Date(b.updated_at);
+            return currentFilter.sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+        } else if (currentFilter.sortBy === 'priority') {
+            const priorityOrder = { high: 3, normal: 2, low: 1 };
+            return currentFilter.sortOrder === 'desc' ? 
+                priorityOrder[b.priority] - priorityOrder[a.priority] : 
+                priorityOrder[a.priority] - priorityOrder[b.priority];
+        }
+        return 0;
+    });
+    
+    renderMemos(filteredMemos);
+}
+
+// 绑定筛选和排序事件
+function bindMemoFilters() {
+    // 分类筛选
+    const categoryFilter = document.getElementById('memo-category-filter');
+    if (categoryFilter) {
+        categoryFilter.addEventListener('change', function() {
+            currentFilter.category = this.value;
+            applyFilters();
+        });
+    }
+    
+    // 排序选择
+    const sortSelect = document.getElementById('memo-sort');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', function() {
+            const [sortBy, sortOrder] = this.value.split('-');
+            currentFilter.sortBy = sortBy;
+            currentFilter.sortOrder = sortOrder;
+            applyFilters();
+        });
+    }
+}
+
+// 渲染备忘录列表
+function renderMemos(memos) {
+    const memoList = document.getElementById('memo-list');
+    if (!memoList) return;
+    
+    memoList.innerHTML = '';
+    
+    if (memos.length === 0) {
+        const emptyMemo = document.createElement('div');
+        emptyMemo.className = 'memo-item';
+        emptyMemo.innerHTML = '<div class="memo-item-content">暂无备忘录</div>';
+        memoList.appendChild(emptyMemo);
+        return;
+    }
+    
+    memos.forEach(memo => {
+        const memoItem = document.createElement('div');
+        memoItem.className = 'memo-item';
+        
+        // 格式化日期
+        const updatedAt = new Date(memo.updated_at);
+        const dateString = updatedAt.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        // 处理标签
+        const tagsHtml = memo.tags && memo.tags.length > 0 ? 
+            memo.tags.map(tag => `<span class="memo-item-tag">${tag}</span>`).join('') : '';
+        
+        // 处理分类
+        const categoryText = memo.category ? {
+            'personal': '个人',
+            'work': '工作',
+            'study': '学习',
+            'other': '其他'
+        }[memo.category] || memo.category : '个人';
+        
+        memoItem.innerHTML = `
+            <div class="memo-item-header">
+                <div class="memo-item-title">${memo.title}</div>
+                <div class="memo-item-meta">
+                    <span class="memo-item-category">${categoryText}</span>
+                    <span class="memo-item-priority ${memo.priority}">${memo.priority === 'high' ? '高' : memo.priority === 'normal' ? '中' : '低'}</span>
+                    <span class="memo-item-date">${dateString}</span>
+                </div>
+            </div>
+            <div class="memo-item-content">${memo.content}</div>
+            ${tagsHtml ? `<div class="memo-item-tags">${tagsHtml}</div>` : ''}
+            <div class="memo-item-actions">
+                <button class="memo-item-action-btn" onclick="editMemo('${memo.id}')">编辑</button>
+                <button class="memo-item-action-btn" onclick="deleteMemo('${memo.id}')">删除</button>
+            </div>
+        `;
+        
+        memoList.appendChild(memoItem);
+    });
+}
+
+// 显示创建备忘录模态窗口
+function showCreateMemoModal() {
+    document.getElementById('memo-modal-title').textContent = '创建备忘录';
+    document.getElementById('memo-id').value = '';
+    document.getElementById('memo-title').value = '';
+    document.getElementById('memo-content').value = '';
+    document.getElementById('memo-tags').value = '';
+    document.getElementById('memo-priority').value = 'normal';
+    // 添加分类选择
+    if (document.getElementById('memo-category')) {
+        document.getElementById('memo-category').value = 'personal';
+    }
+    
+    const modal = document.getElementById('memo-modal');
+    modal.style.display = 'flex';
+    modal.classList.add('modal-visible');
+    
+    // 初始化标签输入处理
+    handleTagInput();
+}
+
+// 检查是否有未保存的更改
+function hasUnsavedChanges() {
+    const title = document.getElementById('memo-title').value.trim();
+    const content = document.getElementById('memo-content').value.trim();
+    const tags = document.getElementById('memo-tags').value.trim();
+    return title || content || tags;
+}
+
+// 关闭备忘录模态窗口
+function closeMemoModal() {
+    // 检查是否有未保存的更改
+    if (hasUnsavedChanges()) {
+        if (!confirm('您有未保存的更改，确定要关闭吗？')) {
+            return;
+        }
+    }
+    
+    const modal = document.getElementById('memo-modal');
+    modal.classList.remove('modal-visible');
+    setTimeout(() => {
+        modal.style.display = 'none';
+    }, 300);
+}
+
+// 处理标签输入
+function handleTagInput() {
+    const tagsInput = document.getElementById('memo-tags');
+    if (tagsInput) {
+        tagsInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                const value = this.value.trim();
+                if (value) {
+                    // 确保标签不重复
+                    const currentTags = this.value.split(',').map(tag => tag.trim()).filter(tag => tag);
+                    if (!currentTags.includes(value)) {
+                        this.value = currentTags.concat(value).join(', ') + ', ';
+                    }
+                }
+            }
+        });
+    }
+}
+
+// 保存备忘录
+async function saveMemo() {
+    const memoId = document.getElementById('memo-id').value;
+    const title = document.getElementById('memo-title').value.trim();
+    const content = document.getElementById('memo-content').value.trim();
+    const tagsInput = document.getElementById('memo-tags').value.trim();
+    const priority = document.getElementById('memo-priority').value;
+    // 添加分类信息
+    const category = document.getElementById('memo-category') ? document.getElementById('memo-category').value : 'personal';
+    
+    if (!title) {
+        showNotification('请输入备忘录标题', 'warning');
+        return;
+    }
+    
+    // 处理标签
+    const tags = tagsInput ? tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+    
+    // 对于更新操作，添加确认机制
+    if (memoId) {
+        if (!confirm('确定要更新这个备忘录吗？')) {
+            return;
+        }
+    }
+    
+    // 显示加载状态
+    const saveBtn = document.querySelector('#memo-modal button[type="button"]');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '保存中...';
+    }
+    
+    try {
+        let response;
+        if (memoId) {
+            // 更新备忘录
+            response = await fetch(`/api/memos/${memoId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({ title, content, tags, priority, category })
+            });
+        } else {
+            // 创建新备忘录
+            response = await fetch('/api/memos', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({ title, content, tags, priority, category })
+            });
+        }
+        
+        if (!response.ok) {
+            throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            closeMemoModal();
+            loadMemos();
+            showNotification(memoId ? '备忘录更新成功' : '备忘录创建成功', 'success');
+        } else {
+            showNotification('保存失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('保存备忘录失败:', error);
+        showNotification('保存失败，请检查网络连接后重试', 'error');
+    } finally {
+        // 恢复按钮状态
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '保存';
+        }
+    }
+}
+
+// 编辑备忘录
+async function editMemo(memoId) {
+    try {
+        const response = await fetch(`/api/memos/${memoId}`, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        if (!response.ok) {
+            throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            const memo = data.memo;
+            document.getElementById('memo-modal-title').textContent = '编辑备忘录';
+            document.getElementById('memo-id').value = memo.id;
+            document.getElementById('memo-title').value = memo.title;
+            document.getElementById('memo-content').value = memo.content;
+            document.getElementById('memo-tags').value = memo.tags.join(', ');
+            document.getElementById('memo-priority').value = memo.priority;
+            // 添加分类选择
+            if (document.getElementById('memo-category')) {
+                document.getElementById('memo-category').value = memo.category || 'personal';
+            }
+            document.getElementById('memo-modal').style.display = 'flex';
+            
+            // 初始化标签输入处理
+            handleTagInput();
+        } else {
+            showNotification('获取备忘录失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('获取备忘录失败:', error);
+        showNotification('获取备忘录失败，请检查网络连接后重试', 'error');
+    }
+}
+
+// 删除备忘录
+async function deleteMemo(memoId) {
+    if (confirm('确定要删除这个备忘录吗？此操作无法撤销。')) {
+        try {
+            const response = await fetch(`/api/memos/${memoId}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                loadMemos();
+                showNotification('备忘录删除成功', 'success');
+            } else {
+                showNotification('删除失败: ' + (data.message || '未知错误'), 'error');
+            }
+        } catch (error) {
+            console.error('删除备忘录失败:', error);
+            showNotification('删除失败，请检查网络连接后重试', 'error');
+        }
+    }
+}
+
+// 搜索备忘录
+async function searchMemos(query) {
+    if (!query.trim()) {
+        loadMemos();
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/memos/search?query=${encodeURIComponent(query)}`, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        if (!response.ok) {
+            throw new Error('API调用失败');
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            renderMemos(data.memos);
+            if (data.memos.length === 0) {
+                showNotification('未找到匹配的备忘录', 'info');
+            }
+        }
+    } catch (error) {
+        console.error('搜索备忘录失败:', error);
+        showNotification('搜索失败，请重试', 'error');
+    }
+}
+
+// 绑定侧边栏导航事件
+function bindSidebarNavigation() {
+    const navItems = document.querySelectorAll('.nav-item');
+    const contentSections = document.querySelectorAll('.content-section');
+    const sectionTitle = document.getElementById('section-title');
+    
+    navItems.forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const section = item.getAttribute('data-section');
+            
+            // 保存当前会话ID到本地存储，无论切换到哪个视图
+            if (currentSessionId) {
+                localStorage.setItem(`currentSessionId_${windowId}`, currentSessionId);
+                console.log('保存会话ID到本地存储:', currentSessionId);
+            }
+            
+            // 更新导航项状态
+            navItems.forEach(nav => nav.classList.remove('active'));
+            item.classList.add('active');
+            
+            // 更新内容区域
+            contentSections.forEach(sec => sec.classList.remove('active'));
+            document.getElementById(`${section}-section`).classList.add('active');
+            
+            // 更新标题
+            if (sectionTitle) {
+                const titles = {
+                    'chat': '聊天',
+                    'device': '设备控制',
+                    'task': '任务管理',
+                    'memory': '记忆管理',
+                    'scheduler': '定时任务',
+                    'distillation': '记忆蒸馏',
+                    'memo': '备忘录',
+                    'status': '系统状态'
+                };
+                sectionTitle.textContent = titles[section] || '聊天';
+            }
+            
+            // 隐藏聊天初始化界面
+            hideInitializationUI();
+            
+            // 加载对应模块的内容
+            if (section === 'memory') {
+                loadMemoryFiles();
+            } else if (section === 'scheduler') {
+                loadScheduleList();
+            } else if (section === 'task') {
+                loadTasks();
+            } else if (section === 'chat') {
+                // 尝试从本地存储恢复会话ID
+                const savedSessionId = localStorage.getItem(`currentSessionId_${windowId}`);
+                if (savedSessionId) {
+                    currentSessionId = savedSessionId;
+                    console.log('从本地存储恢复会话ID:', currentSessionId);
+                }
+                
+                // 如果有当前会话，显示对应对话
+                if (currentSessionId) {
+                    // 不再自动重新加载对话历史，避免新消息被覆盖
+                    // 只有在切换到不同对话时才需要重新加载
+                    console.log('切换到聊天界面，保持当前对话内容');
+                    // 确保聊天区域可见
+                    if (chatArea) {
+                        chatArea.style.display = 'block';
+                    }
+                    hideInitializationUI();
+                } else {
+                    // 没有会话时显示初始化界面
+                    showInitializationUI();
+                }
+            } else if (section === 'memo') {
+                loadMemos();
+                // 绑定备忘录筛选和排序事件
+                bindMemoFilters();
+            }
+        });
+    });
+}
+
+// 防抖函数
+function debounce(func, wait) {
+    let timeout;
+    return function() {
+        const context = this;
+        const args = arguments;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+            func.apply(context, args);
+        }, wait);
+    };
+}
+
+// 搜索聊天历史
+function searchChatHistory(query) {
+    if (!query.trim()) {
+        hideSearchResults();
+        return;
+    }
+    
+    const results = [];
+    
+    chatHistory.forEach((message, index) => {
+        let content = '';
+        let sender = '';
+        
+        if (message.user) {
+            content = message.user;
+            sender = '用户';
+        } else if (message.assistant) {
+            content = message.assistant;
+            sender = '智能体';
+        } else if (message.analysis) {
+            content = message.analysis;
+            sender = '分析';
+        } else if (message.web_search) {
+            content = message.web_search;
+            sender = '搜索';
+        } else if (message.mcp_tool) {
+            content = message.mcp_tool;
+            sender = '工具';
+        }
+        
+        if (content.toLowerCase().includes(query.toLowerCase())) {
+            results.push({
+                index: index,
+                content: content,
+                sender: sender,
+                message: message
+            });
+        }
+    });
+    
+    displaySearchResults(results, query);
+}
+
+// 显示搜索结果
+function displaySearchResults(results, query) {
+    const searchResults = document.getElementById('search-results');
+    if (!searchResults) return;
+    
+    searchResults.innerHTML = '';
+    
+    if (results.length === 0) {
+        searchResults.innerHTML = '<div class="search-no-results">没有找到匹配的结果</div>';
+        searchResults.classList.add('show');
+        return;
+    }
+    
+    results.forEach(result => {
+        const resultItem = document.createElement('div');
+        resultItem.className = 'search-result-item';
+        resultItem.onclick = () => scrollToMessage(result.index);
+        
+        // 高亮显示关键字
+        const highlightedContent = result.content.replace(new RegExp(`(${query})`, 'gi'), '<span class="search-result-highlight">$1</span>');
+        
+        resultItem.innerHTML = `
+            <div class="search-result-header">
+                <span class="search-result-sender">${result.sender}</span>
+                <span class="search-result-time">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="search-result-content">${highlightedContent}</div>
+        `;
+        
+        searchResults.appendChild(resultItem);
+    });
+    
+    searchResults.classList.add('show');
+}
+
+// 隐藏搜索结果
+function hideSearchResults() {
+    const searchResults = document.getElementById('search-results');
+    if (searchResults) {
+        searchResults.classList.remove('show');
+    }
+}
+
+// 滚动到指定消息
+function scrollToMessage(index) {
+    const messageElement = document.getElementById(`message-${index}`);
+    if (messageElement) {
+        // 移除之前的高亮
+        document.querySelectorAll('.message.highlighted').forEach(msg => {
+            msg.classList.remove('highlighted');
+        });
+        
+        // 高亮当前消息
+        messageElement.classList.add('highlighted');
+        
+        // 滚动到消息
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        // 隐藏搜索结果
+        hideSearchResults();
+    }
+}
+
+// 绑定搜索事件
+function bindSearchEvents() {
+    const searchInput = document.getElementById('chat-search-input');
+    const searchBtn = document.getElementById('chat-search-btn');
+    
+    if (searchInput) {
+        // 实时搜索（带防抖）
+        const debouncedSearch = debounce((e) => {
+            searchChatHistory(e.target.value);
+        }, 300);
+        
+        searchInput.addEventListener('input', debouncedSearch);
+        
+        // 点击搜索按钮
+        if (searchBtn) {
+            searchBtn.addEventListener('click', () => {
+                searchChatHistory(searchInput.value);
+            });
+        }
+        
+        // 点击其他地方隐藏搜索结果
+        document.addEventListener('click', (e) => {
+            const searchSection = document.querySelector('.search-section');
+            if (searchSection && !searchSection.contains(e.target)) {
+                hideSearchResults();
+            }
+        });
+    }
 }
 
 // 初始化应用 - 确保DOM加载完成后执行
@@ -974,9 +1557,15 @@ function renderChatList(chats) {
 function createNewChat() {
     console.log('createNewChat() 被调用');
     // 显示命名模态窗口
-    nameModal.style.display = 'flex';
-    // 聚焦到输入框
-    chatNameInput.focus();
+    if (nameModal) {
+        nameModal.style.display = 'flex';
+        // 聚焦到输入框
+        if (chatNameInput) {
+            chatNameInput.focus();
+        }
+    } else {
+        console.error('nameModal 未找到');
+    }
 }
 
 // 确认创建对话
@@ -1150,12 +1739,21 @@ async function loadChatHistory(sessionId) {
                 chatArea.style.display = 'block';
             }
             
+            // 存储对话历史到全局变量
+            chatHistory = data.history;
+            
             // 显示对话历史
-            data.history.forEach(message => {
+            data.history.forEach((message, index) => {
                 if (message.user) {
-                    addMessage('sent', message.user);
+                    addMessage('sent', message.user, `message-${index}`);
                 } else if (message.assistant) {
-                    addMessage('received', message.assistant);
+                    addMessage('received', message.assistant, `message-${index}`);
+                } else if (message.analysis) {
+                    addMessage('analysis', message.analysis, `message-${index}`);
+                } else if (message.web_search) {
+                    addMessage('web_search', message.web_search, `message-${index}`);
+                } else if (message.mcp_tool) {
+                    addMessage('mcp_tool', message.mcp_tool, `message-${index}`);
                 }
             });
             
@@ -1294,6 +1892,132 @@ function hideInitializationUI() {
     }
 }
 
+// 检查是否是备忘录触发指令
+function isMemoTriggerCommand(message) {
+    const triggerPhrases = [
+        '帮我记录',
+        '我要记录',
+        '记录一下',
+        '写个备忘录',
+        '创建备忘录',
+        '添加备忘录',
+        '记下来',
+        '备忘录',
+        '查看备忘录',
+        '列出备忘录',
+        '搜索备忘录',
+        '删除备忘录',
+        '修改备忘录',
+        '更新备忘录'
+    ];
+    
+    return triggerPhrases.some(phrase => message.includes(phrase));
+}
+
+// 处理备忘录触发
+async function handleMemoTrigger(message) {
+    // 检查是否是查看备忘录指令
+    if (message.includes('查看备忘录') || message.includes('列出备忘录')) {
+        // 切换到备忘录页面
+        const memoNavItem = document.querySelector('.nav-item[data-section="memo"]');
+        if (memoNavItem) {
+            memoNavItem.click();
+        }
+        return;
+    }
+    
+    // 检查是否是搜索备忘录指令
+    if (message.includes('搜索备忘录')) {
+        // 提取搜索关键词
+        const searchQuery = message.replace('搜索备忘录', '').trim();
+        if (searchQuery) {
+            // 切换到备忘录页面并执行搜索
+            const memoNavItem = document.querySelector('.nav-item[data-section="memo"]');
+            if (memoNavItem) {
+                memoNavItem.click();
+                // 等待页面加载后执行搜索
+                setTimeout(() => {
+                    const searchInput = document.getElementById('memo-search-input');
+                    if (searchInput) {
+                        searchInput.value = searchQuery;
+                        searchMemos(searchQuery);
+                    }
+                }, 500);
+            }
+        }
+        return;
+    }
+    
+    // 提取可能的备忘录内容（去掉触发词）
+    let content = message;
+    const triggerPhrases = [
+        '帮我记录',
+        '我要记录',
+        '记录一下',
+        '写个备忘录',
+        '创建备忘录',
+        '添加备忘录',
+        '记下来',
+        '备忘录'
+    ];
+    
+    triggerPhrases.forEach(phrase => {
+        content = content.replace(phrase, '').trim();
+    });
+    
+    // 显示创建备忘录模态窗口
+    showCreateMemoModal();
+    
+    // 如果有内容，自动填充
+    if (content) {
+        // 尝试提取标题和内容
+        const parts = content.split('，');
+        if (parts.length >= 2) {
+            document.getElementById('memo-title').value = parts[0];
+            document.getElementById('memo-content').value = parts.slice(1).join('，');
+        } else {
+            document.getElementById('memo-title').value = content;
+        }
+    }
+    
+    // 聚焦到标题输入框
+    document.getElementById('memo-title').focus();
+}
+
+// 处理备忘录相关话题的识别和响应
+function handleMemoRelatedTopic(message) {
+    const memoRelatedPhrases = [
+        '忘记',
+        '记得',
+        '提醒',
+        '事项',
+        '计划',
+        '安排',
+        '任务',
+        '备忘'
+    ];
+    
+    return memoRelatedPhrases.some(phrase => message.includes(phrase));
+}
+
+// 生成备忘录相关的响应
+function generateMemoResponse(message) {
+    if (message.includes('忘记')) {
+        return '我可以帮你创建备忘录来记住重要的事情。你想记录什么内容？';
+    } else if (message.includes('记得')) {
+        return '好的，我会帮你记住这件事。你想创建一个备忘录吗？';
+    } else if (message.includes('提醒')) {
+        return '我可以帮你创建备忘录来提醒你。你想提醒什么事情？';
+    } else if (message.includes('事项') || message.includes('计划') || message.includes('安排')) {
+        return '你可以创建备忘录来记录你的计划和安排。需要我帮你创建一个吗？';
+    } else if (message.includes('任务')) {
+        return '你可以使用备忘录来管理你的任务。需要我帮你创建一个任务备忘录吗？';
+    } else if (message.includes('备忘')) {
+        return '是的，我可以帮你创建和管理备忘录。你想记录什么内容？';
+    }
+    return null;
+}
+
 // 更新发送消息函数
 async function sendMessage() {
     const message = messageInput.value.trim();
@@ -1301,6 +2025,30 @@ async function sendMessage() {
     
     // 隐藏初始化界面
     hideInitializationUI();
+    
+    // 检查是否是备忘录触发指令
+    if (isMemoTriggerCommand(message)) {
+        // 处理备忘录触发
+        handleMemoTrigger(message);
+        // 清空输入框
+        messageInput.value = '';
+        return;
+    }
+    
+    // 检查是否是备忘录相关话题
+    if (handleMemoRelatedTopic(message)) {
+        // 生成备忘录相关的响应
+        const response = generateMemoResponse(message);
+        if (response) {
+            // 添加用户消息
+            addMessage('sent', message);
+            messageInput.value = '';
+            
+            // 添加系统响应
+            addMessage('received', response);
+            return;
+        }
+    }
     
     // 添加用户消息
     addMessage('sent', message);
@@ -1384,94 +2132,141 @@ async function sendMessageWithRetry(message, maxRetries) {
                     
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
-                            const dataStr = line.substring(6);
-                            if (dataStr) {
-                                try {
-                                    console.log('解析数据:', dataStr);
-                                    const data = JSON.parse(dataStr);
-                                    
-                                    // 检查是否是错误响应格式
-                                    if (data.success === false && data.error) {
-                                        // 移除思考过程消息
-                                        removeThinkingMessage(thinkingMessageId);
-                                        // 添加错误消息
-                                        addMessage('received', data.error);
-                                        // 标记为已收到数据
-                                        receivedData = true;
-                                        hasError = true;
-                                        isStreaming = false; // 流式响应结束
-                                        console.log('收到错误消息:', data.error);
-                                    } 
-                                    // 更新思考过程或累积答案内容
-                                    else if (data.type === 'session_id') {
-                                        // 保存会话ID
-                                        currentSessionId = data.content;
-                                        console.log('获取到新的会话ID:', currentSessionId);
-                                        // 保存到本地存储
-                                        localStorage.setItem(`currentSessionId_${windowId}`, currentSessionId);
-                                    } else if (data.type === 'thinking') {
-                                        updateThinkingMessage(thinkingMessageId, data.content);
-                                    } else if (data.type === 'searching') {
-                                        // 移除思考过程消息并显示搜索状态提示
-                                        removeThinkingMessage(thinkingMessageId);
-                                        thinkingMessageId = 'searching-' + Date.now();
-                                        addMessage('searching', data.content, thinkingMessageId);
-                                    } else if (data.type === 'answer') {
-                                        // 累积答案内容
-                                        answerContent += data.content;
-                                        console.log('收到答案内容:', answerContent);
-                                        
-                                        // 实时更新UI
-                                        if (!answerMessageId) {
-                                            // 第一次收到答案内容，移除搜索状态提示并创建答案消息
-                                            removeThinkingMessage(thinkingMessageId);
-                                            answerMessageId = 'answer-' + Date.now();
-                                            addMessage('received', answerContent, answerMessageId);
-                                        } else {
-                                            // 更新现有答案消息
-                                            updateAnswerMessage(answerMessageId, answerContent);
+                                const dataStr = line.substring(6);
+                                if (dataStr) {
+                                    try {
+                                        console.log('解析数据:', dataStr);
+                                        // 尝试解析JSON数据
+                                        let data;
+                                        try {
+                                            data = JSON.parse(dataStr);
+                                        } catch (parseError) {
+                                            console.warn('JSON解析失败，尝试处理非JSON数据:', parseError);
+                                            // 跳过非JSON数据，继续处理下一行
+                                            continue;
                                         }
-                                    } else if (data.type === 'error') {
-                                        // 移除搜索状态提示
-                                        removeThinkingMessage(thinkingMessageId);
-                                        // 添加错误消息
-                                        addMessage('received', data.content);
-                                        // 标记为已收到数据
-                                        receivedData = true;
-                                        hasError = true;
-                                        isStreaming = false; // 流式响应结束
-                                        console.log('收到错误消息:', data.content);
-                                    } else if (data.type === 'stream_end') {
-                                        // 流式响应结束，不做特殊处理
-                                        isStreaming = false; // 流式响应结束
-                                        console.log('流式响应结束');
-                                    } else {
-                                        // 处理其他类型的数据
-                                        console.log('收到其他类型的数据:', data);
-                                    }
-                                } catch (e) {
-                                    console.error('解析SSE数据失败:', e);
-                                    console.error('失败的数据:', dataStr);
-                                    // 显示解析错误
-                                    if (!hasError) {
-                                        removeThinkingMessage(thinkingMessageId);
-                                        addMessage('received', '解析响应数据失败，请稍后重试');
-                                        hasError = true;
-                                        isStreaming = false; // 流式响应结束
+                                        
+                                        // 检查是否是错误响应格式
+                                        if (data.success === false && data.error) {
+                                            // 移除思考过程消息
+                                            removeThinkingMessage(thinkingMessageId);
+                                            // 添加错误消息
+                                            addMessage('received', data.error);
+                                            // 标记为已收到数据
+                                            receivedData = true;
+                                            hasError = true;
+                                            isStreaming = false; // 流式响应结束
+                                            console.log('收到错误消息:', data.error);
+                                        } 
+                                        // 更新思考过程或累积答案内容
+                                        else if (data.type === 'session_id') {
+                                            // 保存会话ID
+                                            currentSessionId = data.content;
+                                            console.log('获取到新的会话ID:', currentSessionId);
+                                            // 保存到本地存储
+                                            localStorage.setItem(`currentSessionId_${windowId}`, currentSessionId);
+                                        } else if (data.type === 'thinking') {
+                                            updateThinkingMessage(thinkingMessageId, data.content);
+                                        } else if (data.type === 'analysis') {
+                                            // 显示思考分析过程
+                                            removeThinkingMessage(thinkingMessageId);
+                                            addMessage('analysis', data.content);
+                                            // 重新创建思考过程消息，以便后续使用
+                                            thinkingMessageId = 'thinking-' + Date.now();
+                                            addMessage('thinking', '正在继续处理...', thinkingMessageId);
+                                        } else if (data.type === 'web_search') {
+                                            // 显示联网搜索过程
+                                            removeThinkingMessage(thinkingMessageId);
+                                            addMessage('web_search', data.content);
+                                            // 重新创建思考过程消息，以便后续使用
+                                            thinkingMessageId = 'thinking-' + Date.now();
+                                            addMessage('thinking', '正在继续处理...', thinkingMessageId);
+                                        } else if (data.type === 'mcp_tool') {
+                                            // 显示MCP工具调用过程
+                                            removeThinkingMessage(thinkingMessageId);
+                                            addMessage('mcp_tool', data.content);
+                                            // 重新创建思考过程消息，以便后续使用
+                                            thinkingMessageId = 'thinking-' + Date.now();
+                                            addMessage('thinking', '正在继续处理...', thinkingMessageId);
+                                        } else if (data.type === 'searching') {
+                                            // 移除思考过程消息并显示搜索状态提示
+                                            removeThinkingMessage(thinkingMessageId);
+                                            thinkingMessageId = 'searching-' + Date.now();
+                                            const searchMessage = addMessage('searching', data.content, thinkingMessageId);
+                                            // 添加搜索进度指示
+                                            let dots = 0;
+                                            const progressInterval = setInterval(() => {
+                                                dots = (dots + 1) % 4;
+                                                const newContent = data.content.replace(/\.{3}$/, '') + '.'.repeat(dots);
+                                                const bubble = searchMessage.querySelector('.bubble');
+                                                if (bubble) {
+                                                    bubble.textContent = newContent;
+                                                }
+                                            }, 500);
+                                            // 保存进度指示的定时器ID，以便在搜索完成后清除
+                                            window.searchProgressInterval = progressInterval;
+                                        } else if (data.type === 'answer') {
+                                            // 清除搜索进度指示的定时器
+                                            if (window.searchProgressInterval) {
+                                                clearInterval(window.searchProgressInterval);
+                                                window.searchProgressInterval = null;
+                                            }
+                                            // 累积答案内容
+                                            answerContent += data.content;
+                                            console.log('收到答案内容:', answerContent);
+                                            
+                                            // 实时更新UI
+                                            if (!answerMessageId) {
+                                                // 第一次收到答案内容，移除搜索状态提示并创建答案消息
+                                                removeThinkingMessage(thinkingMessageId);
+                                                answerMessageId = 'answer-' + Date.now();
+                                                addMessage('received', answerContent, answerMessageId);
+                                            } else {
+                                                // 更新现有答案消息
+                                                updateAnswerMessage(answerMessageId, answerContent);
+                                            }
+                                        } else if (data.type === 'error') {
+                                            // 清除搜索进度指示的定时器
+                                            if (window.searchProgressInterval) {
+                                                clearInterval(window.searchProgressInterval);
+                                                window.searchProgressInterval = null;
+                                            }
+                                            // 移除搜索状态提示
+                                            removeThinkingMessage(thinkingMessageId);
+                                            // 添加错误消息
+                                            addMessage('received', data.content);
+                                            // 标记为已收到数据
+                                            receivedData = true;
+                                            hasError = true;
+                                            isStreaming = false; // 流式响应结束
+                                            console.log('收到错误消息:', data.content);
+                                        } else if (data.type === 'stream_end') {
+                                            // 清除搜索进度指示的定时器
+                                            if (window.searchProgressInterval) {
+                                                clearInterval(window.searchProgressInterval);
+                                                window.searchProgressInterval = null;
+                                            }
+                                            // 流式响应结束，不做特殊处理
+                                            isStreaming = false; // 流式响应结束
+                                            console.log('流式响应结束');
+                                        } else {
+                                            // 处理其他类型的数据
+                                            console.log('收到其他类型的数据:', data);
+                                        }
+                                    } catch (e) {
+                                        console.error('处理SSE数据时发生错误:', e);
+                                        // 只记录错误，不显示错误消息
+                                        // 继续处理下一行数据
+                                        continue;
                                     }
                                 }
                             }
-                        }
                     }
                 } catch (e) {
                     console.error('处理流式数据失败:', e);
-                    // 显示处理错误
-                    if (!hasError) {
-                        removeThinkingMessage(thinkingMessageId);
-                        addMessage('received', '处理响应数据失败，请稍后重试');
-                        hasError = true;
-                        isStreaming = false; // 流式响应结束
-                    }
+                    // 只记录错误，不显示错误消息
+                    // 继续处理，允许其他数据正常接收
+                    isStreaming = false; // 流式响应结束
                 }
             }
             
@@ -1595,6 +2390,35 @@ function addMessage(type, content, id = null) {
         messageDiv.innerHTML = `
             <div class="avatar">🤔</div>
             <div class="bubble thinking">${content}</div>
+        `;
+    } else if (type === 'searching') {
+        messageDiv.innerHTML = `
+            <div class="avatar">🔍</div>
+            <div class="bubble searching">${content}</div>
+        `;
+    } else if (type === 'analysis') {
+        messageDiv.innerHTML = `
+            <div class="avatar">🧠</div>
+            <div class="bubble analysis">
+                <div class="process-header">思考分析过程</div>
+                <div class="process-content">${content}</div>
+            </div>
+        `;
+    } else if (type === 'web_search') {
+        messageDiv.innerHTML = `
+            <div class="avatar">🌐</div>
+            <div class="bubble web-search">
+                <div class="process-header">联网搜索过程</div>
+                <div class="process-content">${content}</div>
+            </div>
+        `;
+    } else if (type === 'mcp_tool') {
+        messageDiv.innerHTML = `
+            <div class="avatar">🛠️</div>
+            <div class="bubble mcp-tool">
+                <div class="process-header">MCP工具调用过程</div>
+                <div class="process-content">${content}</div>
+            </div>
         `;
     } else {
         messageDiv.innerHTML = `

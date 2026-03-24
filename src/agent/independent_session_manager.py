@@ -4,8 +4,8 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
-from src.tools.datetime_utils import format_local_datetime
-from src.agent.langchain_memory_manager import LangChainMemoryManager
+from tools.datetime_utils import format_local_datetime
+from agent.langchain_memory_manager import LangChainMemoryManager
 
 # 简化版日志配置
 import logging
@@ -162,18 +162,41 @@ class IndependentSessionManager:
             
             # 保存到文件
             session_file = os.path.join(self.sessions_dir, f"{session_id}.json")
-            with open(session_file, "w", encoding="utf-8") as f:
+            
+            # 先写入临时文件，再重命名，确保原子性
+            temp_file = session_file + ".tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(serializable_context, f, ensure_ascii=False, indent=2)
+            
+            # 原子性重命名
+            os.replace(temp_file, session_file)
+            
             logger.info(f"会话上下文保存成功，文件: {session_file}")
             return True
+        except PermissionError as e:
+            logger.error(f"保存会话上下文失败 - 权限错误: {e}")
+            logger.error(f"请检查目录权限: {self.sessions_dir}")
+            return False
         except IOError as e:
             logger.error(f"保存会话上下文失败 - IO错误: {e}")
             return False
         except TypeError as e:
             logger.error(f"保存会话上下文失败 - 类型错误（可能是JSON序列化问题）: {e}")
+            # 尝试序列化部分数据，找出问题所在
+            try:
+                test_data = {k: v for k, v in serializable_context.items() if k != "conversation_history"}
+                json.dumps(test_data)
+                logger.error("问题可能出在conversation_history字段")
+            except Exception as inner_e:
+                logger.error(f"测试序列化失败: {inner_e}")
+            return False
+        except json.JSONDecodeError as e:
+            logger.error(f"保存会话上下文失败 - JSON解码错误: {e}")
             return False
         except Exception as e:
             logger.error(f"保存会话上下文失败 - 未知错误: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def _init_memory_manager(self, session_id: str):
@@ -202,9 +225,11 @@ class IndependentSessionManager:
                     self.active_sessions[session_id] = context
                     # 初始化记忆管理器
                     self._init_memory_manager(session_id)
+                    # 确保memory_manager被添加到上下文中
+                    context["memory_manager"] = self.active_sessions[session_id].get("memory_manager")
                     return context
             except Exception as e:
-                print(f"加载会话上下文失败: {e}")
+                logger.error(f"加载会话上下文失败: {e}")
         
         # 返回默认上下文
         context = {
@@ -217,6 +242,8 @@ class IndependentSessionManager:
         self.active_sessions[session_id] = context
         # 初始化记忆管理器
         self._init_memory_manager(session_id)
+        # 确保memory_manager被添加到上下文中
+        context["memory_manager"] = self.active_sessions[session_id].get("memory_manager")
         return context
     
     def update_conversation_history(self, session_id: str, user_message: str, assistant_message: str):
@@ -225,14 +252,49 @@ class IndependentSessionManager:
             context = self.load_session_context(session_id)
             
             # 添加用户消息
-            context["conversation_history"].append({"user": user_message})
-            # 添加助手消息
-            context["conversation_history"].append({"assistant": assistant_message})
+            user_entry = {
+                "user": user_message,
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S'),
+                "importance": self._calculate_message_importance(user_message, assistant_message)
+            }
+            context["conversation_history"].append(user_entry)
             
-            # 限制对话历史长度
+            # 添加助手消息
+            assistant_entry = {
+                "assistant": assistant_message,
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+            }
+            context["conversation_history"].append(assistant_entry)
+            
+            # 优化对话历史长度限制，基于重要性保留消息
             if len(context["conversation_history"]) > 40:  # 20轮对话
-                # 保留最近的20轮对话
-                context["conversation_history"] = context["conversation_history"][-40:]
+                # 按照重要性排序，保留重要的消息
+                important_messages = []
+                recent_messages = context["conversation_history"][-20:]  # 保留最近的10轮对话
+                
+                # 从剩余消息中选择重要的消息
+                for i in range(0, len(context["conversation_history"]) - 20, 2):
+                    if i + 1 < len(context["conversation_history"]):
+                        user_msg = context["conversation_history"][i]
+                        importance = user_msg.get("importance", 5)
+                        if importance >= 7:  # 保留重要性高的消息
+                            important_messages.append(user_msg)
+                            important_messages.append(context["conversation_history"][i + 1])
+                
+                # 合并重要消息和最近消息
+                context["conversation_history"] = important_messages + recent_messages
+                # 确保不超过限制
+                if len(context["conversation_history"]) > 40:
+                    context["conversation_history"] = context["conversation_history"][-40:]
+            
+            # 更新记忆管理器
+            memory_manager = context.get("memory_manager")
+            if memory_manager:
+                memory_manager.add_message(user_message, assistant_message)
+                # 保存记忆到文件
+                memory_file = os.path.join(self.sessions_dir, f"{session_id}_memory.json")
+                memory_manager.save_to_file(memory_file)
+                logger.debug(f"记忆保存成功，文件: {memory_file}")
             
             # 保存上下文
             success = self.save_session_context(session_id, context)
@@ -250,6 +312,59 @@ class IndependentSessionManager:
         except Exception as e:
             logger.error(f"更新对话历史失败 - 未知错误: {e}")
             return False
+    
+    def _calculate_message_importance(self, user_message: str, assistant_message: str) -> int:
+        """计算消息重要性
+        
+        Args:
+            user_message: 用户消息
+            assistant_message: 助手消息
+            
+        Returns:
+            重要性级别（0-10）
+        """
+        importance = 5  # 默认重要性
+        
+        # 关键词权重
+        important_keywords = {
+            "名字": 8,
+            "姓名": 8,
+            "职业": 7,
+            "工作": 7,
+            "爱好": 6,
+            "喜欢": 6,
+            "讨厌": 6,
+            "需求": 9,
+            "要求": 9,
+            "问题": 8,
+            "困难": 8,
+            "计划": 7,
+            "目标": 7,
+            "时间": 6,
+            "日期": 6,
+            "地点": 6,
+            "地址": 6
+        }
+        
+        # 分析用户消息
+        for keyword, weight in important_keywords.items():
+            if keyword in user_message:
+                importance = max(importance, weight)
+        
+        # 分析助手消息
+        for keyword, weight in important_keywords.items():
+            if keyword in assistant_message:
+                importance = max(importance, weight)
+        
+        # 消息长度也是重要性的一个指标
+        total_length = len(user_message) + len(assistant_message)
+        if total_length > 100:
+            importance += 1
+        if total_length > 200:
+            importance += 1
+        
+        # 确保重要性在0-10之间
+        return min(max(importance, 0), 10)
     
     def get_conversation_history(self, session_id: str) -> List[Dict]:
         """获取对话历史"""
@@ -279,10 +394,14 @@ class IndependentSessionManager:
             # 获取当前时间戳
             timestamp = format_local_datetime('%Y-%m-%dT%H:%M:%S')
             
+            # 计算消息重要性
+            importance = self._calculate_message_importance(user_message, assistant_message)
+            
             # 添加用户消息
             user_entry = {
                 "user": user_message,
-                "timestamp": timestamp
+                "timestamp": timestamp,
+                "importance": importance
             }
             context["conversation_history"].append(user_entry)
             logger.debug(f"添加用户消息成功: {user_message[:50]}...")
@@ -295,10 +414,27 @@ class IndependentSessionManager:
             context["conversation_history"].append(assistant_entry)
             logger.debug(f"添加助手消息成功: {assistant_message[:50]}...")
             
-            # 限制对话历史长度，保留最近的20轮对话（40条消息）
-            if len(context["conversation_history"]) > 40:
-                context["conversation_history"] = context["conversation_history"][-40:]
-                logger.debug("对话历史长度超过限制，已截断")
+            # 优化对话历史长度限制，基于重要性保留消息
+            if len(context["conversation_history"]) > 40:  # 20轮对话
+                # 按照重要性排序，保留重要的消息
+                important_messages = []
+                recent_messages = context["conversation_history"][-20:]  # 保留最近的10轮对话
+                
+                # 从剩余消息中选择重要的消息
+                for i in range(0, len(context["conversation_history"]) - 20, 2):
+                    if i + 1 < len(context["conversation_history"]):
+                        user_msg = context["conversation_history"][i]
+                        importance = user_msg.get("importance", 5)
+                        if importance >= 7:  # 保留重要性高的消息
+                            important_messages.append(user_msg)
+                            important_messages.append(context["conversation_history"][i + 1])
+                
+                # 合并重要消息和最近消息
+                context["conversation_history"] = important_messages + recent_messages
+                # 确保不超过限制
+                if len(context["conversation_history"]) > 40:
+                    context["conversation_history"] = context["conversation_history"][-40:]
+                logger.debug("对话历史长度超过限制，已基于重要性截断")
             
             # 确保目录存在
             os.makedirs(self.sessions_dir, exist_ok=True)
@@ -351,3 +487,93 @@ class IndependentSessionManager:
         context = self.load_session_context(session_id)
         context["conversation_history"] = []
         self.save_session_context(session_id, context)
+    
+    def backup_session(self, session_id: str) -> bool:
+        """备份会话状态"""
+        try:
+            # 加载会话上下文
+            context = self.load_session_context(session_id)
+            
+            # 确保备份目录存在
+            backup_dir = os.path.join(self.base_dir, "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            # 生成备份文件名
+            timestamp = format_local_datetime('%Y-%m-%d_%H-%M-%S')
+            backup_file = os.path.join(backup_dir, f"{session_id}_{timestamp}.json")
+            
+            # 创建可序列化的上下文副本
+            serializable_context = {k: v for k, v in context.items() if k != "memory_manager"}
+            
+            # 保存备份
+            with open(backup_file, "w", encoding="utf-8") as f:
+                json.dump(serializable_context, f, ensure_ascii=False, indent=2)
+            
+            # 备份记忆
+            memory_manager = context.get("memory_manager")
+            if memory_manager:
+                memory_backup_file = os.path.join(backup_dir, f"{session_id}_{timestamp}_memory.json")
+                memory_manager.save_to_file(memory_backup_file)
+            
+            logger.info(f"会话备份成功，文件: {backup_file}")
+            return True
+        except Exception as e:
+            logger.error(f"会话备份失败: {e}")
+            return False
+    
+    def restore_session(self, session_id: str, backup_file: str) -> bool:
+        """从备份恢复会话状态"""
+        try:
+            # 检查备份文件是否存在
+            if not os.path.exists(backup_file):
+                logger.error(f"备份文件不存在: {backup_file}")
+                return False
+            
+            # 加载备份文件
+            with open(backup_file, "r", encoding="utf-8") as f:
+                context = json.load(f)
+            
+            # 更新会话ID
+            context["session_id"] = session_id
+            
+            # 保存上下文
+            success = self.save_session_context(session_id, context)
+            if not success:
+                logger.error("恢复会话上下文失败")
+                return False
+            
+            # 恢复记忆
+            memory_backup_file = backup_file.replace(".json", "_memory.json")
+            if os.path.exists(memory_backup_file):
+                context = self.load_session_context(session_id)
+                memory_manager = context.get("memory_manager")
+                if memory_manager:
+                    memory_manager.load_from_file(memory_backup_file)
+                    # 保存记忆
+                    memory_file = os.path.join(self.sessions_dir, f"{session_id}_memory.json")
+                    memory_manager.save_to_file(memory_file)
+            
+            logger.info(f"会话恢复成功，文件: {backup_file}")
+            return True
+        except Exception as e:
+            logger.error(f"会话恢复失败: {e}")
+            return False
+    
+    def list_session_backups(self, session_id: str) -> List[str]:
+        """列出会话的所有备份"""
+        try:
+            backup_dir = os.path.join(self.base_dir, "backups")
+            if not os.path.exists(backup_dir):
+                return []
+            
+            backups = []
+            for filename in os.listdir(backup_dir):
+                if filename.startswith(f"{session_id}_") and filename.endswith(".json") and "_memory" not in filename:
+                    backups.append(os.path.join(backup_dir, filename))
+            
+            # 按时间排序，最新的在前
+            backups.sort(reverse=True)
+            return backups
+        except Exception as e:
+            logger.error(f"列出会话备份失败: {e}")
+            return []

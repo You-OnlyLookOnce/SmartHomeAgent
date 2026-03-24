@@ -1,5 +1,5 @@
 from typing import Dict, Optional, List
-from src.ai.qiniu_llm import QiniuLLM
+from ai.qiniu_llm import QiniuLLM
 
 class SearchIntegration:
     """搜索结果处理和整合功能"""

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from typing import Dict, Optional, Any, List
 
 # 导入人设管理模块
-from src.core.persona_manager import persona_manager
+from core.persona_manager import persona_manager
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -621,10 +621,10 @@ class QiniuLLM:
                 "model": self.model,
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "temperature": self.temperature,
-                "top_p": 0.9,
-                "frequency_penalty": 0.1,
-                "presence_penalty": 0.1,
+                "temperature": 0.7,  # 降低温度，减少随机性
+                "top_p": 0.8,  # 调整top_p，控制输出多样性
+                "frequency_penalty": 0.3,  # 增加频率惩罚，减少重复
+                "presence_penalty": 0.3,  # 增加存在惩罚，鼓励新内容
                 "stream": True
             }
             
@@ -693,14 +693,20 @@ class QiniuLLM:
                                                                 "type": "tool_call",
                                                                 "tool_calls": tool_calls
                                                             }
+                                                        elif "role" in delta:
+                                                            # 处理角色信息
+                                                            role = delta["role"]
+                                                            yield {
+                                                                "type": "role",
+                                                                "content": role
+                                                            }
                                             except Exception as e:
                                                 logger.error(f"Failed to parse SSE data: {e}")
                                                 # 打印失败的数据，以便调试
                                                 logger.error(f"Failed data: {data_str}")
-                                                yield {
-                                                    "type": "error",
-                                                    "content": f"解析响应数据失败: {str(e)}"
-                                                }
+                                                # 继续处理，不中断流式响应
+                                                # 只记录错误，不向用户显示详细错误信息
+                                                continue
                         
                         # 流式响应结束
                         # 无论buffer是否为空，都正常结束流式响应
@@ -754,10 +760,10 @@ class QiniuLLM:
                 "model": self.model,
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "temperature": self.temperature,
-                "top_p": 0.9,
-                "frequency_penalty": 0.1,
-                "presence_penalty": 0.1,
+                "temperature": 0.7,  # 降低温度，减少随机性
+                "top_p": 0.8,  # 调整top_p，控制输出多样性
+                "frequency_penalty": 0.3,  # 增加频率惩罚，减少重复
+                "presence_penalty": 0.3,  # 增加存在惩罚，鼓励新内容
                 "stream": False
             }
             

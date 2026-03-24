@@ -1,6 +1,6 @@
 from typing import Optional, Dict, Any
-from src.skills.search_skills.search_judgment import SearchJudgment
-from src.skills.knowledge_skills.built_in_knowledge import BuiltInKnowledge
+from skills.search_skills.search_judgment import SearchJudgment
+from skills.knowledge_skills.built_in_knowledge import BuiltInKnowledge
 
 class MultiLayerDecision:
     """多层决策系统，分析用户查询并决定如何处理"""

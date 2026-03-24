@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-from src.core.persona_manager import persona_manager
+from core.persona_manager import persona_manager
 import re
 
 class PersonaValidator:

@@ -43,6 +43,10 @@
                         <span class="nav-icon">🔥</span>
                         <span class="nav-text">记忆蒸馏</span>
                     </li>
+                    <li class="nav-item" data-section="memo">
+                        <span class="nav-icon">📝</span>
+                        <span class="nav-text">备忘录</span>
+                    </li>
                     <li class="nav-item" data-section="status">
                         <span class="nav-icon">📊</span>
                         <span class="nav-text">系统状态</span>
@@ -61,6 +65,14 @@
                         <button class="action-btn" id="rename-chat-btn">重命名</button>
                         <button class="action-btn" id="delete-chat-btn">删除</button>
                     </div>
+                </div>
+                <!-- 搜索框 -->
+                <div class="search-section">
+                    <div class="search-container">
+                        <input type="text" id="chat-search-input" placeholder="搜索聊天记录...">
+                        <button class="search-btn" id="chat-search-btn">🔍</button>
+                    </div>
+                    <div class="search-results" id="search-results"></div>
                 </div>
             </header>
             
@@ -228,6 +240,20 @@
                     </div>
                 </section>
                 
+                <!-- 备忘录区域 -->
+                <section id="memo-section" class="content-section">
+                    <div class="memo-panel">
+                        <h3>备忘录管理</h3>
+                        <div class="memo-controls">
+                            <button class="create-memo-btn" onclick="showCreateMemoModal()">+ 新建备忘录</button>
+                            <input type="text" id="memo-search-input" placeholder="搜索备忘录..." onkeyup="searchMemos(this.value)">
+                        </div>
+                        <div class="memo-list" id="memo-list">
+                            <!-- 备忘录列表将动态生成 -->
+                        </div>
+                    </div>
+                </section>
+                
                 <!-- 系统状态区域 -->
                 <section id="status-section" class="content-section">
                     <div class="status-panel">
@@ -270,6 +296,43 @@
             <div class="modal-footer">
                 <button class="cancel-btn" id="cancel-create-btn">取消</button>
                 <button class="confirm-btn" id="confirm-create-btn">确认</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 备忘录模态窗口 -->
+    <div class="modal" id="memo-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="memo-modal-title">创建备忘录</h3>
+                <button class="close-btn" onclick="closeMemoModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="memo-id">
+                <div class="form-group">
+                    <label for="memo-title">标题:</label>
+                    <input type="text" id="memo-title" placeholder="输入备忘录标题" maxlength="50">
+                </div>
+                <div class="form-group">
+                    <label for="memo-content">内容:</label>
+                    <textarea id="memo-content" rows="5" placeholder="输入备忘录内容"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="memo-tags">标签 (用逗号分隔):</label>
+                    <input type="text" id="memo-tags" placeholder="输入标签，如：工作,个人">
+                </div>
+                <div class="form-group">
+                    <label for="memo-priority">优先级:</label>
+                    <select id="memo-priority">
+                        <option value="high">高</option>
+                        <option value="normal" selected>中</option>
+                        <option value="low">低</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" onclick="closeMemoModal()">取消</button>
+                <button class="confirm-btn" onclick="saveMemo()">保存</button>
             </div>
         </div>
     </div>

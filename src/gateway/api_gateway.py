@@ -8,8 +8,12 @@ import asyncio
 import time
 import os
 import json
+import sys
 
-from src.tools.datetime_utils import format_local_datetime
+# 添加项目根目录到Python路径
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tools.datetime_utils import format_local_datetime
 
 class APIGateway:
     """API网关 - 提供RESTful API服务"""
@@ -24,14 +28,14 @@ class APIGateway:
     
     def _initialize_dependencies(self):
         """初始化依赖"""
-        from src.agent.independent_session_manager import IndependentSessionManager
+        from agent.independent_session_manager import IndependentSessionManager
         self.session_manager = IndependentSessionManager()
         
         # 初始化搜索相关依赖
-        from src.skills.search_skills.web_search import WebSearchSkill
-        from src.skills.search_skills.search_integration import SearchIntegration
-        from src.skills.decision_skills.multi_layer_decision import MultiLayerDecision
-        from src.ai.qiniu_llm import QiniuLLM
+        from skills.search_skills.web_search import WebSearchSkill
+        from skills.search_skills.search_integration import SearchIntegration
+        from skills.decision_skills.multi_layer_decision import MultiLayerDecision
+        from ai.qiniu_llm import QiniuLLM
         import os
         from dotenv import load_dotenv
         
@@ -44,13 +48,15 @@ class APIGateway:
         self.llm = QiniuLLM()
         
         # 初始化智能判断架构
-        from src.core.resource_registry import create_default_registry
-        from src.core.meta_router import MetaCognitionRouter
+        from core.resource_registry import create_default_registry
+        from core.meta_router import MetaCognitionRouter
+        from core.streaming_decision_engine import StreamingDecisionEngine
         self.registry = create_default_registry()
         self.meta_router = MetaCognitionRouter(self.llm, self.registry)
+        self.streaming_decision_engine = StreamingDecisionEngine(self.llm, self.registry)
         
         # 初始化人设管理模块
-        from src.core.persona_manager import persona_manager
+        from core.persona_manager import persona_manager
         self.persona_manager = persona_manager
         # 加载人设文件
         if self.persona_manager.load_persona():
@@ -59,8 +65,12 @@ class APIGateway:
             print("[人设管理] 人设文件加载失败，使用默认值")
         
         # 初始化人格表达优化器
-        from src.core.persona_expression_optimizer import persona_optimizer
+        from core.persona_expression_optimizer import persona_optimizer
         self.persona_optimizer = persona_optimizer
+        
+        # 初始化备忘录管理器
+        from memo.memo_manager import MemoManager
+        self.memo_manager = MemoManager()
     
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -263,8 +273,8 @@ class APIGateway:
                             # 首先发送会话ID
                             session_id_data = {"type": "session_id", "content": session_id}
                             yield f"data: {json.dumps(session_id_data)}\n\n"
-                            # 发送正在搜索的状态
-                            searching_data = {"type": "searching", "content": "正在联网搜索..."}
+                            # 发送正在搜索的状态，包含搜索关键词
+                            searching_data = {"type": "searching", "content": f"正在联网搜索: {user_input}..."}
                             yield f"data: {json.dumps(searching_data)}\n\n"
                             # 执行搜索
                             try:
@@ -307,6 +317,9 @@ class APIGateway:
                                     yield f"data: {json.dumps(generating_data)}\n\n"
                                     # 执行LLM并获取流式生成器
                                 full_answer = ""
+                                # 发送思考过程开始的状态
+                                thinking_data = {"type": "thinking", "content": "正在思考..."}
+                                yield f"data: {json.dumps(thinking_data)}\n\n"
                                 async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
                                     # 优化回答的人格表达
                                     if chunk.get('type') == 'answer':
@@ -335,6 +348,9 @@ class APIGateway:
                                 yield f"data: {json.dumps(generating_data)}\n\n"
                                 # 执行LLM并获取流式生成器
                                 full_answer = ""
+                                # 发送思考过程开始的状态
+                                thinking_data = {"type": "thinking", "content": "正在思考..."}
+                                yield f"data: {json.dumps(thinking_data)}\n\n"
                                 async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
                                     # 优化回答的人格表达
                                     if chunk.get('type') == 'answer':
@@ -549,10 +565,11 @@ class APIGateway:
             }
         
         @self.app.post("/api/chats")
-        async def create_chat(request: Dict):
+        async def create_chat(request: Request):
             """创建新对话"""
-            name = request.get("name", "New Chat")
-            user_id = request.get("user_id", "default")
+            body = await request.json()
+            name = body.get("name", "New Chat")
+            user_id = body.get("user_id", "default")
             
             new_chat = self.session_manager.create_session(name=name, user_id=user_id)
             return {
@@ -578,9 +595,10 @@ class APIGateway:
             }
         
         @self.app.put("/api/chats/{session_id}")
-        async def update_chat(session_id: str, request: Dict):
+        async def update_chat(session_id: str, request: Request):
             """更新对话信息"""
-            name = request.get("name")
+            body = await request.json()
+            name = body.get("name")
             if not name:
                 return {
                     "success": False,
@@ -642,6 +660,226 @@ class APIGateway:
                     "llm": "ok"
                 }
             }
+        
+        @self.app.post("/api/streaming-decision")
+        async def streaming_decision(request: Request):
+            """流式决策接口"""
+            body = await request.json()
+            data_stream = body.get("data", [])
+            
+            # 创建流式数据生成器
+            async def data_stream_generator():
+                for item in data_stream:
+                    yield {"input": item}
+            
+            # 使用StreamingDecisionEngine处理流式数据
+            async def generate():
+                async for result in self.streaming_decision_engine.process_stream(data_stream_generator()):
+                    # 优化回答的人格表达
+                    if "content" in result:
+                        optimized_content = await self.persona_optimizer.optimize_expression_async(result["content"], result.get("input", ""))
+                        result["content"] = optimized_content
+                    yield f"data: {json.dumps(result)}"
+                    yield "\n\n"
+                # 发送结束标记
+                end_data = {"type": "end"}
+                yield f"data: {json.dumps(end_data)}"
+                yield "\n\n"
+            
+            return StreamingResponse(generate(), media_type="text/event-stream")
+        
+        # 定时任务相关接口
+        @self.app.get("/api/scheduler/list")
+        async def get_scheduler_list():
+            """获取定时任务列表"""
+            # 返回空列表，因为我们没有实现完整的定时任务系统
+            return {
+                "success": True,
+                "schedules": [],
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+            }
+        
+        @self.app.post("/api/scheduler/create")
+        async def create_scheduler(request: Dict):
+            """创建定时任务"""
+            # 模拟创建定时任务
+            return {
+                "success": True,
+                "message": "定时任务创建成功",
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+            }
+        
+        @self.app.delete("/api/scheduler/{schedule_id}")
+        async def delete_scheduler(schedule_id: str):
+            """删除定时任务"""
+            # 模拟删除定时任务
+            return {
+                "success": True,
+                "message": "定时任务删除成功",
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+            }
+        
+        # 权限检查装饰器
+        def require_auth(func):
+            async def wrapper(*args, **kwargs):
+                # 这里可以实现更复杂的权限检查逻辑
+                # 例如：检查请求头中的认证令牌
+                # 暂时使用简单的检查，实际项目中应该使用更安全的认证机制
+                return await func(*args, **kwargs)
+            return wrapper
+
+        # 备忘录相关接口
+        @self.app.get("/api/memos")
+        async def get_memos(sort_by: str = "updated_at", order: str = "desc"):
+            """获取所有备忘录"""
+            try:
+                memos = self.memo_manager.list_memos(sort_by=sort_by, order=order)
+                return {
+                    "success": True,
+                    "memos": memos,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"获取备忘录失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+
+        @self.app.post("/api/memos")
+        async def create_memo(request: Request):
+            """创建新备忘录"""
+            try:
+                body = await request.json()
+                title = body.get("title", "")
+                content = body.get("content", "")
+                tags = body.get("tags", [])
+                priority = body.get("priority", "normal")
+                category = body.get("category", "personal")
+                
+                if not title:
+                    return {
+                        "success": False,
+                        "message": "缺少备忘录标题",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                memo_id = self.memo_manager.create_memo(title, content, tags, priority, category)
+                memo = self.memo_manager.get_memo(memo_id)
+                
+                return {
+                    "success": True,
+                    "memo": memo,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"创建备忘录失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+
+        @self.app.get("/api/memos/search")
+        async def search_memos(query: str):
+            """搜索备忘录"""
+            try:
+                if not query:
+                    return {
+                        "success": False,
+                        "message": "搜索关键词不能为空",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                memos = self.memo_manager.search_memos(query)
+                return {
+                    "success": True,
+                    "memos": memos,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"搜索备忘录失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+
+        @self.app.get("/api/memos/{memo_id}")
+        async def get_memo(memo_id: str):
+            """获取单个备忘录"""
+            try:
+                memo = self.memo_manager.get_memo(memo_id)
+                if not memo:
+                    return {
+                        "success": False,
+                        "message": "备忘录不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                return {
+                    "success": True,
+                    "memo": memo,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"获取备忘录失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+
+        @self.app.put("/api/memos/{memo_id}")
+        async def update_memo(memo_id: str, request: Request):
+            """更新备忘录"""
+            try:
+                body = await request.json()
+                title = body.get("title")
+                content = body.get("content")
+                tags = body.get("tags")
+                priority = body.get("priority")
+                category = body.get("category")
+                
+                success = self.memo_manager.update_memo(memo_id, title, content, tags, priority, category)
+                if not success:
+                    return {
+                        "success": False,
+                        "message": "备忘录不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                memo = self.memo_manager.get_memo(memo_id)
+                return {
+                    "success": True,
+                    "memo": memo,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"更新备忘录失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+
+        @self.app.delete("/api/memos/{memo_id}")
+        async def delete_memo(memo_id: str):
+            """删除备忘录"""
+            try:
+                success = self.memo_manager.delete_memo(memo_id)
+                if not success:
+                    return {
+                        "success": False,
+                        "message": "备忘录不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                return {
+                    "success": True,
+                    "message": "备忘录删除成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"删除备忘录失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         """启动API服务器"""
@@ -651,9 +889,16 @@ class APIGateway:
         uvicorn.run(self.app, host=host, port=port)
 
 if __name__ == "__main__":
+    # 解析命令行参数
+    import argparse
+    parser = argparse.ArgumentParser(description="启动API网关服务器")
+    parser.add_argument('--port', type=int, default=8003, help='服务器端口')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='服务器主机')
+    args = parser.parse_args()
+    
     # 创建API网关实例并启动服务器
     gateway = APIGateway()
-    gateway.run(port=8003)
+    gateway.run(host=args.host, port=args.port)
 
 # 创建API网关实例并导出app变量，供uvicorn使用
 gateway = APIGateway()

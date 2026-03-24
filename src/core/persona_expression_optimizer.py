@@ -1,7 +1,7 @@
 from typing import Dict, Any, Optional, Tuple
-from src.core.persona_manager import persona_manager
-from src.core.persona_validator import persona_validator
-from src.core.persona_config import persona_config
+from core.persona_manager import persona_manager
+from core.persona_validator import persona_validator
+from core.persona_config import persona_config
 import re
 import time
 import asyncio
@@ -169,14 +169,9 @@ class PersonaExpressionOptimizer:
         
         # 4. 交互模式优化
         if self.persona_config.get_scope("interaction_mode"):
-            # 使用 "悦悦" 自称
-            if "悦悦" not in optimized_content:
-                # 根据场景添加自称
-                if scene == "qa":
-                    optimized_content = "悦悦觉得" + optimized_content if not optimized_content.startswith("悦悦") else optimized_content
-                elif scene == "chat":
-                    optimized_content = "悦悦" + optimized_content if not optimized_content.startswith("悦悦") else optimized_content
-                # 指令场景不需要添加自称
+            # 移除自动添加"悦悦"前缀的逻辑
+            # 保持其他交互模式优化功能
+            pass
         
         # 5. 场景特定优化
         if scene == "emotional":

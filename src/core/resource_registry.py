@@ -153,52 +153,132 @@ def create_default_registry() -> ResourceRegistry:
     # 注册基础资源
     registry.register(
         name="get_current_datetime",
-        description="获取当前日期和时间，格式为YYYY-MM-DD HH:MM:SS，用于回答'现在是什么时候？'、'当前时间'等问题",
+        description="获取当前日期和时间，格式为YYYY-MM-DD HH:MM:SS，用于回答'现在是什么时候？'、'当前时间'等需要同时知道日期和时间的问题",
         tool_func=get_current_datetime,
-        examples=["现在是什么时候？", "当前时间", "现在的日期和时间", "现在几点几分？", "现在的具体时间"]
+        examples=["现在是什么时候？", "当前时间", "现在的日期和时间", "现在几点几分？", "现在的具体时间", "今天现在几点？", "现在是几号几点？"]
     )
     
     registry.register(
         name="get_current_date",
-        description="获取当前日期，格式为YYYY-MM-DD，用于回答'今天是几号？'、'今天的日期'等问题",
+        description="获取当前日期，格式为YYYY-MM-DD，用于回答'今天是几号？'、'今天的日期'等只需要日期信息的问题",
         tool_func=get_current_date,
-        examples=["今天是几号？", "今天的日期", "现在是什么日期", "今天是几月几号？", "今天是哪一天？"]
+        examples=["今天是几号？", "今天的日期", "现在是什么日期", "今天是几月几号？", "今天是哪一天？", "今天几号？", "今天的具体日期"]
     )
     
     registry.register(
         name="get_current_time",
-        description="获取当前时间，格式为HH:MM:SS，用于回答'现在几点了？'、'当前时间'等问题",
+        description="获取当前时间，格式为HH:MM:SS，用于回答'现在几点了？'、'当前时间'等只需要时间信息的问题",
         tool_func=get_current_time,
-        examples=["现在几点了？", "当前时间", "现在的时间", "现在几点钟？", "现在的具体时间"]
+        examples=["现在几点了？", "当前时间", "现在的时间", "现在几点钟？", "现在的具体时间", "现在几点？", "当前几点？"]
     )
     
     registry.register(
         name="calculate",
-        description="计算数学表达式，支持基本算术操作",
+        description="计算数学表达式，支持基本算术操作（加、减、乘、除），用于回答数学计算问题",
         tool_func=calculate,
-        examples=["一加一等于几？", "3+5*2", "100除以5"]
+        examples=["一加一等于几？", "3+5*2", "100除以5", "25减10", "4乘以6", "100加200", "50除以2"]
     )
     
     registry.register(
         name="get_identity",
-        description="获取智能体的身份信息",
+        description="获取智能体的身份信息，用于回答'你是谁？'、'你是什么？'等关于智能体身份的问题",
         tool_func=get_identity,
-        examples=["你是谁？", "你是什么？", "你的名字"]
+        examples=["你是谁？", "你是什么？", "你的名字", "你叫什么名字？", "你是做什么的？", "你的身份是什么？", "你是什么类型的助手？"]
     )
     
     registry.register(
         name="greet",
         description="回复用户的问候语，用于回答'你好'、'早上好'、'下午好'等问候语",
         tool_func=greet,
-        examples=["你好", "你好啊", "早上好", "下午好", "晚上好", "嗨", "哈喽"]
+        examples=["你好", "你好啊", "早上好", "下午好", "晚上好", "嗨", "哈喽", "嗨你好", "你好呀", "早上好呀", "下午好呀", "晚上好呀"]
     )
     
     registry.register(
         name="get_relative_date",
         description="处理相对日期问题，用于回答'明天是几号'、'后天是几号'、'昨天是几号'等相对日期问题",
         tool_func=get_relative_date,
-        examples=["明天是几号", "后天是几号", "昨天是几号", "前天是几号"]
+        examples=["明天是几号", "后天是几号", "昨天是几号", "前天是几号", "明天的日期", "后天的日期", "昨天的日期", "前天的日期"]
     )
+    
+    # 注册本地时间工具
+    try:
+        from src.skills.mcp_skills.simple_local_time_tool import simple_local_time_tool
+        
+        # 注册本地时间工具
+        registry.register(
+            name="get_local_time",
+            description="获取当前时间和日期信息，包括年、月、日、时、分、秒，用于回答'现在是什么时候？'、'当前时间'等时间相关问题",
+            tool_func=simple_local_time_tool.get_time,
+            examples=["现在是什么时候？", "当前时间", "现在的日期和时间", "现在几点几分？", "现在的具体时间", "今天现在几点？", "现在是几号几点？"]
+        )
+    except Exception as e:
+        print(f"注册本地时间工具失败: {str(e)}")
+    
+    # 注册本地天气工具
+    try:
+        from src.skills.mcp_skills.simple_local_weather_tool import simple_local_weather_tool
+        
+        # 注册天气工具
+        registry.register(
+            name="get_weather",
+            description="获取指定位置的天气信息，包括温度、天气状况、湿度、风力等详细信息，用于回答'北京的天气怎么样？'、'上海今天天气如何？'等天气相关问题",
+            tool_func=simple_local_weather_tool.get_weather,
+            examples=["北京的天气怎么样？", "上海今天天气如何？", "广州的天气", "深圳今天的温度", "杭州的天气状况", "成都今天天气好吗？", "武汉的天气如何？"]
+        )
+    except Exception as e:
+        print(f"注册本地天气工具失败: {str(e)}")
+    
+    # 注册闲聊工具
+    try:
+        from src.skills.mcp_skills.small_talk_tool import get_small_talk_response
+        
+        # 注册闲聊工具
+        registry.register(
+            name="small_talk",
+            description="处理一般性的闲聊话题，如问候、情感表达、日常对话、兴趣爱好、天气相关、赞美、感谢、道歉、告别等，用于回答'你好'、'今天过得怎么样'、'我很高兴'等闲聊类问题",
+            tool_func=get_small_talk_response,
+            examples=["你好", "今天过得怎么样", "我很高兴", "最近忙什么呢", "你喜欢什么电影", "今天天气真好", "谢谢你", "对不起", "再见"]
+        )
+    except Exception as e:
+        print(f"注册闲聊工具失败: {str(e)}")
+    
+    # 注册文件操作MCP工具
+    try:
+        from src.skills.mcp_skills.file_operations_mcp import file_operations_mcp
+        
+        # 注册文件读取工具
+        registry.register(
+            name="read_file",
+            description="读取文件内容，用于回答'读取文件'、'查看文件'等文件读取相关问题",
+            tool_func=file_operations_mcp.read_file,
+            examples=["读取文件 D:\\test.txt", "查看文件内容", "读取文件内容"]
+        )
+        
+        # 注册文件创建工具
+        registry.register(
+            name="create_file",
+            description="创建文件，用于回答'创建文件'、'写入文件'等文件创建相关问题",
+            tool_func=file_operations_mcp.create_file,
+            examples=["创建文件 D:\\test.txt", "写入文件内容", "创建新文件"]
+        )
+        
+        # 注册文件搜索工具
+        registry.register(
+            name="search_files",
+            description="搜索文件，用于回答'搜索文件'、'查找文件'等文件搜索相关问题",
+            tool_func=file_operations_mcp.search_files,
+            examples=["搜索文件", "查找文件", "搜索包含关键词的文件"]
+        )
+        
+        # 注册文件改写工具
+        registry.register(
+            name="rewrite_file",
+            description="改写文件内容，用于回答'修改文件'、'编辑文件'等文件改写相关问题",
+            tool_func=file_operations_mcp.rewrite_file,
+            examples=["修改文件", "编辑文件内容", "改写文件"]
+        )
+    except Exception as e:
+        print(f"注册文件操作MCP工具失败: {str(e)}")
     
     return registry
 
