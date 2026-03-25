@@ -280,6 +280,61 @@ def create_default_registry() -> ResourceRegistry:
     except Exception as e:
         print(f"注册文件操作MCP工具失败: {str(e)}")
     
+    # 注册备忘录工具
+    try:
+        from src.memo.memo_manager import MemoManager
+        memo_manager = MemoManager()
+        
+        # 注册创建备忘录工具
+        registry.register(
+            name="create_memo",
+            description="创建新备忘录，用于回答'创建备忘录'、'新建备忘录'等备忘录创建相关问题",
+            tool_func=memo_manager.create_memo,
+            examples=["创建备忘录", "新建备忘录", "创建一个关于会议的备忘录"]
+        )
+        
+        # 注册获取备忘录工具
+        registry.register(
+            name="get_memo",
+            description="获取单个备忘录，用于回答'获取备忘录'、'查看备忘录'等备忘录获取相关问题",
+            tool_func=memo_manager.get_memo,
+            examples=["获取备忘录", "查看备忘录", "获取备忘录详情"]
+        )
+        
+        # 注册更新备忘录工具
+        registry.register(
+            name="update_memo",
+            description="更新备忘录，用于回答'更新备忘录'、'修改备忘录'等备忘录更新相关问题",
+            tool_func=memo_manager.update_memo,
+            examples=["更新备忘录", "修改备忘录", "编辑备忘录内容"]
+        )
+        
+        # 注册删除备忘录工具
+        registry.register(
+            name="delete_memo",
+            description="删除备忘录，用于回答'删除备忘录'、'移除备忘录'等备忘录删除相关问题",
+            tool_func=memo_manager.delete_memo,
+            examples=["删除备忘录", "移除备忘录", "删除这个备忘录"]
+        )
+        
+        # 注册列出备忘录工具
+        registry.register(
+            name="list_memos",
+            description="列出所有备忘录，用于回答'列出备忘录'、'查看所有备忘录'等备忘录列表相关问题",
+            tool_func=memo_manager.list_memos,
+            examples=["列出备忘录", "查看所有备忘录", "获取备忘录列表"]
+        )
+        
+        # 注册搜索备忘录工具
+        registry.register(
+            name="search_memos",
+            description="搜索备忘录，用于回答'搜索备忘录'、'查找备忘录'等备忘录搜索相关问题",
+            tool_func=memo_manager.search_memos,
+            examples=["搜索备忘录", "查找备忘录", "搜索包含关键词的备忘录"]
+        )
+    except Exception as e:
+        print(f"注册备忘录工具失败: {str(e)}")
+    
     return registry
 
 # 创建默认注册表实例

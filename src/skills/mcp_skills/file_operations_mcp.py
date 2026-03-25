@@ -5,20 +5,20 @@ import re
 import fnmatch
 import asyncio
 import tempfile
+from src.core.unified_mcp_protocol import MCPBase, UnifiedMCPProtocol
 
-class FileOperationsMCP:
+class FileOperationsMCP(MCPBase):
     """文件操作管理控制程序(MCP) - 实现文件读取、创建、查找和改写功能"""
     
     def __init__(self):
         """初始化文件操作MCP"""
-        self.logger = logging.getLogger(__name__)
+        super().__init__()
         # 定义允许操作的路径范围（白名单）
         self.allowed_paths = [
             os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),  # 项目根目录
             os.path.expanduser("~"),  # 用户主目录
             tempfile.gettempdir(),  # 临时目录
         ]
-        self.logger.info("文件操作MCP初始化完成")
     
     def _is_path_allowed(self, path: str) -> bool:
         """检查路径是否在允许的范围内
@@ -403,6 +403,114 @@ class FileOperationsMCP:
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.delete_file, file_path)
+    
+    async def handle_read(self, params: Dict[str, Any]) -> Any:
+        """处理读取操作
+        
+        Args:
+            params: 操作参数，包含file_path
+            
+        Returns:
+            操作结果
+        """
+        file_path = params.get("file_path")
+        if not file_path:
+            return "错误: 缺少file_path参数"
+        return self.read_file(file_path)
+    
+    async def handle_create(self, params: Dict[str, Any]) -> Any:
+        """处理创建操作
+        
+        Args:
+            params: 操作参数，包含file_path、content、overwrite
+            
+        Returns:
+            操作结果
+        """
+        file_path = params.get("file_path")
+        content = params.get("content")
+        overwrite = params.get("overwrite", False)
+        
+        if not file_path or content is None:
+            return "错误: 缺少file_path或content参数"
+        
+        return self.create_file(file_path, content, overwrite)
+    
+    async def handle_update(self, params: Dict[str, Any]) -> Any:
+        """处理更新操作
+        
+        Args:
+            params: 操作参数，包含file_path、new_content、start_line、end_line
+            
+        Returns:
+            操作结果
+        """
+        file_path = params.get("file_path")
+        new_content = params.get("new_content")
+        start_line = params.get("start_line")
+        end_line = params.get("end_line")
+        
+        if not file_path or new_content is None:
+            return "错误: 缺少file_path或new_content参数"
+        
+        return self.rewrite_file(file_path, new_content, start_line, end_line)
+    
+    async def handle_delete(self, params: Dict[str, Any]) -> Any:
+        """处理删除操作
+        
+        Args:
+            params: 操作参数，包含file_path
+            
+        Returns:
+            操作结果
+        """
+        file_path = params.get("file_path")
+        if not file_path:
+            return "错误: 缺少file_path参数"
+        
+        return self.delete_file(file_path)
+    
+    async def handle_search(self, params: Dict[str, Any]) -> Any:
+        """处理搜索操作
+        
+        Args:
+            params: 操作参数，包含directory、filename_pattern、file_extension、content_keyword
+            
+        Returns:
+            操作结果
+        """
+        directory = params.get("directory")
+        filename_pattern = params.get("filename_pattern")
+        file_extension = params.get("file_extension")
+        content_keyword = params.get("content_keyword")
+        
+        if not directory:
+            return ["错误: 缺少directory参数"]
+        
+        return self.search_files(directory, filename_pattern, file_extension, content_keyword)
+    
+    async def handle_execute(self, params: Dict[str, Any]) -> Any:
+        """处理执行操作
+        
+        Args:
+            params: 操作参数
+            
+        Returns:
+            操作结果
+        """
+        action = params.get("action")
+        if action == "read_file":
+            return await self.handle_read(params)
+        elif action == "create_file":
+            return await self.handle_create(params)
+        elif action == "update_file":
+            return await self.handle_update(params)
+        elif action == "delete_file":
+            return await self.handle_delete(params)
+        elif action == "search_files":
+            return await self.handle_search(params)
+        else:
+            return "错误: 不支持的操作类型"
 
 # 创建文件操作MCP实例
 file_operations_mcp = FileOperationsMCP()

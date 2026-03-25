@@ -246,7 +246,7 @@ class IndependentSessionManager:
         context["memory_manager"] = self.active_sessions[session_id].get("memory_manager")
         return context
     
-    def update_conversation_history(self, session_id: str, user_message: str, assistant_message: str):
+    def update_conversation_history(self, session_id: str, user_message: str, assistant_message: str, process_info: Optional[List[Dict]] = None):
         """更新对话历史"""
         try:
             context = self.load_session_context(session_id)
@@ -258,6 +258,15 @@ class IndependentSessionManager:
                 "importance": self._calculate_message_importance(user_message, assistant_message)
             }
             context["conversation_history"].append(user_entry)
+            
+            # 添加过程信息
+            if process_info:
+                for process in process_info:
+                    process_entry = {
+                        "process": process,
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                    context["conversation_history"].append(process_entry)
             
             # 添加助手消息
             assistant_entry = {
@@ -371,7 +380,7 @@ class IndependentSessionManager:
         context = self.load_session_context(session_id)
         return context.get("conversation_history", [])
     
-    def save_conversation_history(self, session_id: str, user_message: str, assistant_message: str) -> bool:
+    def save_conversation_history(self, session_id: str, user_message: str, assistant_message: str, process_info: Optional[List[Dict]] = None) -> bool:
         """
         全新的对话历史保存函数
         用于将用户发送的前端信息和AI生成的新回答完整保存到历史聊天记录JSON文件中
@@ -380,6 +389,7 @@ class IndependentSessionManager:
             session_id (str): 会话ID
             user_message (str): 用户输入文本
             assistant_message (str): AI响应内容
+            process_info (Optional[List[Dict]]): 过程信息列表，包含思考、搜索、工具调用等过程
             
         Returns:
             bool: 保存成功返回True，失败返回False
@@ -390,6 +400,23 @@ class IndependentSessionManager:
             # 加载现有会话上下文
             context = self.load_session_context(session_id)
             logger.debug(f"加载会话上下文成功，当前对话历史长度: {len(context.get('conversation_history', []))}")
+            
+            # 检查是否存在相同的消息组合，避免重复添加
+            conversation_history = context.get('conversation_history', [])
+            has_duplicate = False
+            
+            # 检查最近的对话，避免重复
+            for i in range(len(conversation_history) - 2, -1, -2):
+                if i >= 0 and i + 1 < len(conversation_history):
+                    user_entry = conversation_history[i]
+                    assistant_entry = conversation_history[i + 1]
+                    if user_entry.get('user') == user_message and assistant_entry.get('assistant') == assistant_message:
+                        logger.info(f"发现重复的消息组合，跳过保存: {user_message[:50]}...")
+                        has_duplicate = True
+                        break
+            
+            if has_duplicate:
+                return True
             
             # 获取当前时间戳
             timestamp = format_local_datetime('%Y-%m-%dT%H:%M:%S')
@@ -405,6 +432,16 @@ class IndependentSessionManager:
             }
             context["conversation_history"].append(user_entry)
             logger.debug(f"添加用户消息成功: {user_message[:50]}...")
+            
+            # 添加过程信息
+            if process_info:
+                for process in process_info:
+                    process_entry = {
+                        "process": process,
+                        "timestamp": timestamp
+                    }
+                    context["conversation_history"].append(process_entry)
+                logger.debug(f"添加过程信息成功，共{len(process_info)}条")
             
             # 添加助手消息
             assistant_entry = {

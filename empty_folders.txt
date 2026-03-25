@@ -1,6 +1,0 @@
-data\distilled
-data\logs
-data\memories
-data\user_profiles
-logs
-src\utils

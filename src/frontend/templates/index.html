@@ -34,6 +34,7 @@
                     <li class="nav-item" data-section="task">
                         <span class="nav-icon">📋</span>
                         <span class="nav-text">任务管理</span>
+                        <span class="notification-badge" id="task-badge">0</span>
                     </li>
                     <li class="nav-item" data-section="memory">
                         <span class="nav-icon">🧠</span>
@@ -107,17 +108,20 @@
                 <!-- 设备控制区域 -->
                 <section id="device-section" class="content-section">
                     <div class="device-panel" id="device-panel">
-                        <h3>设备控制</h3>
-                        <div class="device-list">
-                            <div class="device-item">
-                                <h4>客厅灯</h4>
-                                <div class="device-controls">
-                                    <button class="device-btn" data-device="living_room_light" data-action="on">开</button>
-                                    <button class="device-btn" data-device="living_room_light" data-action="off">关</button>
-                                    <input type="range" min="0" max="100" value="50" class="brightness-slider" data-device="living_room_light">
-                                    <span class="brightness-value">50%</span>
-                                </div>
-                            </div>
+                        <div class="device-panel-header">
+                            <h3>设备控制</h3>
+                            <button class="add-device-btn" id="add-device-btn" onclick="showAddDeviceModal()">
+                                <span class="btn-icon">+</span>
+                                <span class="btn-text">添加设备</span>
+                            </button>
+                        </div>
+                        <div class="device-list" id="device-list">
+                            <!-- 设备列表将动态生成 -->
+                        </div>
+                        <div class="device-empty-state" id="device-empty-state" style="display: none;">
+                            <div class="empty-icon">🏠</div>
+                            <div class="empty-text">暂无设备</div>
+                            <div class="empty-subtext">点击上方"添加设备"按钮添加您的第一个智能设备</div>
                         </div>
                     </div>
                 </section>
@@ -336,6 +340,170 @@
             </div>
         </div>
     </div>
+    
+    <!-- 添加/编辑设备模态窗口 -->
+    <div class="modal" id="device-modal" style="display: none;">
+        <div class="modal-content device-modal-content">
+            <div class="modal-header">
+                <h3 id="device-modal-title">添加设备</h3>
+                <button class="close-btn" onclick="closeDeviceModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="device-id">
+                <div class="form-group">
+                    <label for="device-name">设备名称: <span class="required">*</span></label>
+                    <input type="text" id="device-name" placeholder="输入设备名称，如：客厅台灯" maxlength="30">
+                    <span class="error-msg" id="device-name-error"></span>
+                </div>
+                <div class="form-group">
+                    <label for="device-type">设备类型: <span class="required">*</span></label>
+                    <select id="device-type" onchange="onDeviceTypeChange()">
+                        <option value="">请选择设备类型</option>
+                        <option value="lamp">💡 台灯</option>
+                        <option value="ac">❄️ 空调</option>
+                        <option value="curtain">🪟 窗帘</option>
+                    </select>
+                    <span class="error-msg" id="device-type-error"></span>
+                </div>
+                <div class="form-group device-type-info" id="device-type-info" style="display: none;">
+                    <div class="type-description" id="type-description"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" onclick="closeDeviceModal()">取消</button>
+                <button class="confirm-btn" id="save-device-btn" onclick="saveDevice()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 设备控制面板模态窗口 -->
+    <div class="modal" id="device-control-modal" style="display: none;">
+        <div class="modal-content control-modal-content">
+            <div class="modal-header">
+                <h3 id="control-modal-title">设备控制</h3>
+                <button class="close-btn" onclick="closeDeviceControlModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="control-device-id">
+                <div class="device-status-bar" id="device-status-bar">
+                    <span class="status-indicator" id="device-status-indicator"></span>
+                    <span class="status-text" id="device-status-text"></span>
+                </div>
+                
+                <!-- 台灯控制面板 -->
+                <div class="control-panel lamp-panel" id="lamp-control-panel" style="display: none;">
+                    <div class="control-row power-control">
+                        <span class="control-label">电源</span>
+                        <button class="power-btn" id="lamp-power-btn" onclick="toggleLampPower()">
+                            <span class="power-icon">⚡</span>
+                            <span class="power-text">关闭</span>
+                        </button>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">亮度: <span id="lamp-brightness-value">50</span>%</span>
+                        <input type="range" id="lamp-brightness-slider" min="0" max="100" value="50" 
+                               class="control-slider" oninput="onLampBrightnessChange(this.value)">
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">色温</span>
+                        <div class="button-group">
+                            <button class="mode-btn" id="lamp-temp-normal" onclick="setLampColorTemp('normal')">正常</button>
+                            <button class="mode-btn" id="lamp-temp-eye-care" onclick="setLampColorTemp('eye_care')">护眼</button>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">定时关机</span>
+                        <div class="timer-control">
+                            <select id="lamp-timer-select" onchange="setLampTimer(this.value)">
+                                <option value="">不设置</option>
+                                <option value="15">15分钟后</option>
+                                <option value="30">30分钟后</option>
+                                <option value="60">1小时后</option>
+                                <option value="120">2小时后</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 空调控制面板 -->
+                <div class="control-panel ac-panel" id="ac-control-panel" style="display: none;">
+                    <div class="control-row power-control">
+                        <span class="control-label">电源</span>
+                        <button class="power-btn" id="ac-power-btn" onclick="toggleACPower()">
+                            <span class="power-icon">⚡</span>
+                            <span class="power-text">关闭</span>
+                        </button>
+                    </div>
+                    <div class="control-row temperature-control">
+                        <span class="control-label">温度</span>
+                        <div class="temp-control-wrapper">
+                            <button class="temp-btn temp-minus" onclick="adjustACTemp(-1)">-</button>
+                            <span class="temp-display" id="ac-temp-display">26°C</span>
+                            <button class="temp-btn temp-plus" onclick="adjustACTemp(1)">+</button>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">模式</span>
+                        <div class="button-group">
+                            <button class="mode-btn" id="ac-mode-cool" onclick="setACMode('cool')">制冷</button>
+                            <button class="mode-btn" id="ac-mode-heat" onclick="setACMode('heat')">制热</button>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <span class="control-label">风速: <span id="ac-fan-value">3</span>档</span>
+                        <input type="range" id="ac-fan-slider" min="1" max="5" value="3" 
+                               class="control-slider" oninput="onACFanChange(this.value)">
+                    </div>
+                </div>
+                
+                <!-- 窗帘控制面板 -->
+                <div class="control-panel curtain-panel" id="curtain-control-panel" style="display: none;">
+                    <div class="control-row position-display">
+                        <span class="control-label">当前位置</span>
+                        <span class="position-value" id="curtain-position-value">0%</span>
+                    </div>
+                    <div class="control-row">
+                        <input type="range" id="curtain-position-slider" min="0" max="100" value="0" 
+                               class="control-slider" oninput="onCurtainPositionChange(this.value)">
+                    </div>
+                    <div class="control-row button-row">
+                        <button class="control-action-btn" onclick="controlCurtain('close')">
+                            <span class="action-icon">🔒</span>
+                            <span class="action-text">全关</span>
+                        </button>
+                        <button class="control-action-btn stop-btn" onclick="controlCurtain('stop')">
+                            <span class="action-icon">⏸️</span>
+                            <span class="action-text">停止</span>
+                        </button>
+                        <button class="control-action-btn" onclick="controlCurtain('open')">
+                            <span class="action-icon">🔓</span>
+                            <span class="action-text">全开</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 确认删除模态窗口 -->
+    <div class="modal" id="confirm-modal" style="display: none;">
+        <div class="modal-content confirm-modal-content">
+            <div class="modal-header">
+                <h3 id="confirm-modal-title">确认操作</h3>
+                <button class="close-btn" onclick="closeConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-modal-message">确定要执行此操作吗？</p>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" onclick="closeConfirmModal()">取消</button>
+                <button class="confirm-btn confirm-danger" id="confirm-modal-btn">确认</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast 提示 -->
+    <div class="toast-container" id="toast-container"></div>
     
     <script src="../static/js/app.js"></script>
 </body>

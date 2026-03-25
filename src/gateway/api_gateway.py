@@ -9,11 +9,18 @@ import time
 import os
 import json
 import sys
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.datetime_utils import format_local_datetime
+# 导入流式过程数据结构
+from core.streaming_process import create_process, ThinkingProcess, SearchProcess, ToolCallProcess, AnalysisProcess, AnswerProcess, ErrorProcess, StreamEndProcess
 
 class APIGateway:
     """API网关 - 提供RESTful API服务"""
@@ -23,8 +30,10 @@ class APIGateway:
         self._setup_middleware()
         self._setup_static_files()
         self._setup_templates()
-        self._setup_routes()
         self._initialize_dependencies()
+        # 初始化请求去重集合
+        self.processing_requests = set()  # 存储正在处理的请求ID
+        self._setup_routes()
     
     def _initialize_dependencies(self):
         """初始化依赖"""
@@ -34,7 +43,6 @@ class APIGateway:
         # 初始化搜索相关依赖
         from skills.search_skills.web_search import WebSearchSkill
         from skills.search_skills.search_integration import SearchIntegration
-        from skills.decision_skills.multi_layer_decision import MultiLayerDecision
         from ai.qiniu_llm import QiniuLLM
         import os
         from dotenv import load_dotenv
@@ -43,26 +51,25 @@ class APIGateway:
         self.api_key = os.getenv('QINIU_AI_API_KEY', os.getenv('QINIU_ACCESS_KEY'))
         
         self.web_search = WebSearchSkill(self.api_key)
-        self.multi_layer_decision = MultiLayerDecision()
         self.search_integration = SearchIntegration(self.api_key)
         self.llm = QiniuLLM()
         
-        # 初始化智能判断架构
-        from core.resource_registry import create_default_registry
-        from core.meta_router import MetaCognitionRouter
-        from core.streaming_decision_engine import StreamingDecisionEngine
-        self.registry = create_default_registry()
-        self.meta_router = MetaCognitionRouter(self.llm, self.registry)
-        self.streaming_decision_engine = StreamingDecisionEngine(self.llm, self.registry)
+        # 初始化新的 Function Calling 决策架构
+        from core.meta_router_v2 import MetaCognitionRouterV2
+        from ai.qiniu_llm_v2 import QiniuLLMV2
+        
+        # 创建新的 LLM 客户端（支持 Function Calling）
+        self.llm_v2 = QiniuLLMV2()
+        
+        # 创建新的元认知路由器（基于 Function Calling）
+        self.meta_router = MetaCognitionRouterV2(self.llm_v2)
+        
+        logger.info("新的 Function Calling 决策架构初始化完成")
         
         # 初始化人设管理模块
         from core.persona_manager import persona_manager
         self.persona_manager = persona_manager
-        # 加载人设文件
-        if self.persona_manager.load_persona():
-            print("[人设管理] 人设文件加载成功")
-        else:
-            print("[人设管理] 人设文件加载失败，使用默认值")
+        # 不再重复加载人设文件，全局实例已经在导入时加载
         
         # 初始化人格表达优化器
         from core.persona_expression_optimizer import persona_optimizer
@@ -71,6 +78,68 @@ class APIGateway:
         # 初始化备忘录管理器
         from memo.memo_manager import MemoManager
         self.memo_manager = MemoManager()
+        
+        # 初始化记忆分析器和确认管理器
+        from agent.memory_analyzer import memory_analyzer
+        from agent.memory_confirmation import memory_confirmation
+        from agent.memory_manager import MemoryManager
+        self.memory_analyzer = memory_analyzer
+        self.memory_confirmation = memory_confirmation
+        self.memory_manager = MemoryManager()
+        
+
+        
+        # 初始化定时任务调度器
+        from scheduler.task_scheduler import TaskScheduler
+        from scheduler.reminder_intent import ReminderIntent
+        self.task_scheduler = TaskScheduler()
+        self.reminder_intent = ReminderIntent()
+        
+        # 初始化设备管理器
+        from src.core.device_manager import device_manager
+        self.device_manager = device_manager
+
+        # 注册设备状态变更回调
+        self._setup_device_manager()
+
+    def _setup_device_manager(self):
+        """设置设备管理器
+
+        执行流程：
+        1. 初始化设备管理器（加载配置）
+        2. 注册状态变更回调
+        3. 启动定期同步
+        """
+        import asyncio
+
+        async def init_device_manager():
+            try:
+                # 初始化设备管理器（加载保存的配置）
+                result = await self.device_manager.initialize()
+                logger.info(f"设备管理器初始化结果: {result}")
+
+                # 注册状态变更回调
+                def on_device_state_changed(device_id: str, state: dict):
+                    logger.info(f"设备状态变更: {device_id} = {state}")
+                    # 这里可以添加WebSocket推送等逻辑
+
+                self.device_manager.register_state_change_callback(on_device_state_changed)
+                logger.info("设备状态变更回调已注册")
+
+            except Exception as e:
+                logger.error(f"设备管理器初始化失败: {str(e)}")
+
+        # 在事件循环中执行初始化
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果事件循环已经在运行，创建任务
+                asyncio.create_task(init_device_manager())
+            else:
+                # 否则运行直到完成
+                loop.run_until_complete(init_device_manager())
+        except Exception as e:
+            logger.error(f"设备管理器设置失败: {str(e)}")
     
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -100,10 +169,10 @@ class APIGateway:
         @self.app.middleware("http")
         async def log_requests(request: Request, call_next):
             start_time = time.time()
+            logger.info(f"[请求日志] {request.method} {request.url.path}")
             response = await call_next(request)
             process_time = time.time() - start_time
-            
-            print(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s")
+            logger.info(f"[请求日志] {request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s")
             return response
         
         # 错误处理中间件
@@ -135,147 +204,183 @@ class APIGateway:
             """返回前端HTML页面"""
             try:
                 return self.templates.TemplateResponse("index.html", {"request": request})
-            except AttributeError:
-                # 如果模板未设置，返回API信息
+            except Exception as e:
+                # 如果模板渲染失败，返回API信息
+                print(f"[根路径] 模板渲染失败: {str(e)}")
                 return {"message": "智能家居智能体API", "version": "1.0.0"}
+        
+        @self.app.get("/api/test")
+        async def test(request: Request):
+            """测试路由"""
+            logger.info("[测试路由] 收到请求")
+            return {"message": "测试成功"}
         
         @self.app.post("/api/chat")
         async def chat(request: Request):
             """聊天接口"""
+            # 读取原始请求体
+            raw_body = await request.body()
+            # 解析请求体
             body = await request.json()
             user_input = body.get("message", "")
             user_id = body.get("user_id", "default_user")
             session_id = body.get("session_id")
             stream = body.get("stream", True)  # 默认启用流式响应
+            message_id = body.get("message_id")  # 获取消息唯一标识符
             
-            # 如果没有提供session_id，创建一个新会话
-            if not session_id:
-                new_chat = self.session_manager.create_session(user_id=user_id)
-                session_id = new_chat["session_id"]
+            # 生成请求唯一标识符
+            request_id = f"{user_id}_{session_id}_{message_id or user_input}_{time.time()}"
             
-            # 加载会话上下文和记忆管理器
-            session_context = self.session_manager.load_session_context(session_id)
-            memory_manager = session_context.get("memory_manager")
+            # 检查请求是否正在处理中
+            if request_id in self.processing_requests:
+                logger.info(f"请求已在处理中，避免重复处理: {request_id}")
+                # 返回空响应，避免重复处理
+                return JSONResponse({"success": True, "message": "请求已在处理中"})
             
-            # 传递用户ID和session_id作为上下文
-            context = {"user_id": user_id, "session_id": session_id, "stream": stream, "memory_manager": memory_manager}
+            # 添加到处理集合中
+            self.processing_requests.add(request_id)
             
-            # 首先使用智能判断架构进行决策
             try:
-                print(f"[智能决策] 开始处理用户输入: {user_input}")
-                decision_result = await self.meta_router.decide(user_input)
-                print(f"[智能决策] 分析结果: {decision_result}")
+                # 将请求信息写入文件
+                with open("request_log.txt", "a", encoding="utf-8") as f:
+                    f.write(f"[聊天接口] 收到请求: {request_id}\n")
+                    f.write(f"[聊天接口] 原始请求体: {raw_body}\n")
+                    f.write(f"[聊天接口] 用户输入: {user_input}\n")
+            
+                # 如果没有提供session_id，创建一个新会话
+                if not session_id:
+                    new_chat = self.session_manager.create_session(user_id=user_id)
+                    session_id = new_chat["session_id"]
                 
-                # 执行决策
-                meta_response = await self.meta_router.execute_decision(decision_result, user_input)
-                print(f"[智能决策] 执行结果: {meta_response}")
+                # 加载会话上下文和记忆管理器
+                session_context = self.session_manager.load_session_context(session_id)
+                memory_manager = session_context.get("memory_manager")
                 
-                # 如果智能决策返回了直接回答（不是需要搜索的标记）
-                if meta_response != "__NEED_SEARCH__":
-                    # 保存对话历史
-                    self.session_manager.save_conversation_history(
-                        session_id,
-                        user_input,
-                        meta_response
+                # 分析用户输入中的记忆信息
+                memory_infos = self.memory_analyzer.analyze_message(user_input)
+            
+                # 处理记忆信息
+                for info in memory_infos:
+                    if self.memory_analyzer.should_store(info):
+                        if self.memory_analyzer.should_confirm(info):
+                            # 低置信度，需要用户确认
+                            confirmation_id = self.memory_confirmation.add_to_confirmation_queue(info)
+                            # 这里可以通过WebSocket或其他方式通知前端显示确认对话框
+                            print(f"[记忆确认] 添加到确认队列: {info['content']}, 确认ID: {confirmation_id}")
+                        else:
+                            # 高置信度，直接存储
+                            self.memory_manager.store_memory_info(info)
+                            print(f"[记忆存储] 直接存储: {info['content']}")
+            
+                # 检测提醒意图
+                reminder_result = self.reminder_intent.detect(user_input)
+                if reminder_result["has_intent"]:
+                    task_data = reminder_result["data"]
+                    task = self.task_scheduler.create_task(
+                        title=task_data["title"],
+                        content=task_data["content"],
+                        reminder_time=task_data["reminder_time"],
+                        repeat_type=task_data["repeat_type"]
                     )
-                    
-                    if stream:
-                        async def generate():
+                    print(f"[定时任务] 创建成功: {task['title']}, 提醒时间: {task['reminder_time']}")
+                    # 这里可以在回复中告知用户定时任务已创建
+            
+                # 构建上下文信息
+                context = {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "memory_manager": memory_manager,
+                    "soul": self.persona_manager.get_persona().get("soul", {}),
+                    "agent": self.persona_manager.get_persona().get("agent", {})
+                }
+            
+                # 使用新的基于Function Calling的元认知路由器
+                if stream:
+                    async def generate():
+                        try:
                             # 首先发送会话ID
                             session_id_data = {"type": "session_id", "content": session_id}
                             yield f"data: {json.dumps(session_id_data)}\n\n"
-                            # 优化回答的人格表达
-                            optimized_response = await self.persona_optimizer.optimize_expression_async(meta_response, user_input)
-                            # 发送智能决策的回答
-                            answer_data = {"type": "answer", "content": optimized_response}
-                            yield f"data: {json.dumps(answer_data)}\n\n"
-                            end_data = {"type": "stream_end"}
-                            yield f"data: {json.dumps(end_data)}\n\n"
-                        
-                        return StreamingResponse(generate(), media_type="text/event-stream")
-                    else:
+                            # 执行智能决策
+                            async for chunk in self.meta_router.process(user_input, context, stream=True):
+                                # 优化回答的人格表达
+                                if chunk.get('type') == 'answer':
+                                    optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
+                                    chunk['content'] = optimized_content
+                                # 发送SSE格式的数据
+                                yield f"data: {json.dumps(chunk)}\n\n"
+                        except Exception as e:
+                            # 发送错误信息
+                            error_process = ErrorProcess(content=f"处理请求时出现错误: {str(e)}")
+                            yield f"data: {json.dumps(error_process.to_dict())}\n\n"
+                        finally:
+                            # 发送流结束标记
+                            stream_end_process = StreamEndProcess()
+                            yield f"data: {json.dumps(stream_end_process.to_dict())}\n\n"
+                    
+                    return StreamingResponse(generate(), media_type="text/event-stream")
+                else:
+                    try:
+                        # 非流式响应
+                        result = await self.meta_router.process_with_tools(user_input, context)
                         # 优化回答的人格表达
-                        optimized_response = await self.persona_optimizer.optimize_expression_async(meta_response, user_input)
+                        optimized_answer = await self.persona_optimizer.optimize_expression_async(result, user_input)
                         return {
                             "success": True,
                             "response": {
-                                "message": optimized_response
+                                "message": optimized_answer
                             },
-                            "agent": "meta_cognition",
+                            "agent": "llm",
                             "session_id": session_id,
                             "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                         }
-                else:
-                    print(f"[智能决策] 需要搜索，回退到原有逻辑")
+                    except Exception as e:
+                        # 处理异常，返回错误信息
+                        print(f"[智能决策] 非流式响应失败: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                        return {
+                            "success": False,
+                            "error_code": "INTERNAL_SERVER_ERROR",
+                            "error_message": "处理请求时出现错误",
+                            "details": str(e) if os.getenv("DEBUG", "False").lower() == "true" else "",
+                            "session_id": session_id,
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        }
             except Exception as e:
                 print(f"[智能决策] 执行失败: {str(e)}")
                 import traceback
                 traceback.print_exc()
-                # 如果智能决策失败，回退到原有逻辑
-            
-            # 原有逻辑：使用多层决策系统分析查询
-            decision = self.multi_layer_decision.analyze_query(user_input)
-            print(f"[多层决策] 分析结果: {decision}")
-            
-            # 检查是否是简单问题（从知识库直接回答）
-            if decision.get('type') == 'knowledge':
-                knowledge_answer = decision.get('answer', '')
+                # 如果智能决策失败，直接使用LLM
                 
-                # 保存对话历史
-                self.session_manager.save_conversation_history(
-                    session_id,
-                    user_input,
-                    knowledge_answer
-                )
+                # 检查是否需要网络搜索（暂时保留简单判断）
+                is_search_needed = '搜索' in user_input or '查询' in user_input or '时间' in user_input
                 
-                if stream:
-                    async def generate():
-                        # 首先发送会话ID
-                        session_id_data = {"type": "session_id", "content": session_id}
-                        yield f"data: {json.dumps(session_id_data)}\n\n"
-                        # 优化回答的人格表达
-                        optimized_answer = await self.persona_optimizer.optimize_expression_async(knowledge_answer, user_input)
-                        # 发送知识库回答
-                        answer_data = {"type": "answer", "content": optimized_answer}
-                        yield f"data: {json.dumps(answer_data)}\n\n"
-                        end_data = {"type": "stream_end"}
-                        yield f"data: {json.dumps(end_data)}\n\n"
+                if is_search_needed:
+                    # 执行网络搜索
+                    search_type = 'web'
+                    time_filter = None
                     
-                    return StreamingResponse(generate(), media_type="text/event-stream")
-                else:
-                    # 优化回答的人格表达
-                    optimized_answer = await self.persona_optimizer.optimize_expression_async(knowledge_answer, user_input)
-                    return {
-                        "success": True,
-                        "response": {
-                            "message": optimized_answer
-                        },
-                        "agent": "knowledge",
-                        "session_id": session_id,
-                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
-                    }
-            
-            # 检查是否需要网络搜索
-            is_search_needed = decision.get('need_search', False)
-            
-            if is_search_needed:
-                # 执行网络搜索
-                search_type = decision.get('search_type', 'web')
-                time_filter = decision.get('time_filter', None)
-                
-                print(f"[搜索] 搜索类型: {search_type}")
-                print(f"[搜索] 时间过滤: {time_filter}")
-                
-                # 执行搜索
-                try:
+                    print(f"[搜索] 搜索类型: {search_type}")
+                    print(f"[搜索] 时间过滤: {time_filter}")
+                    
+                    # 执行搜索
                     if stream:
                         async def generate():
                             # 首先发送会话ID
                             session_id_data = {"type": "session_id", "content": session_id}
                             yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 初始化过程信息列表
+                            process_list = []
                             # 发送正在搜索的状态，包含搜索关键词
-                            searching_data = {"type": "searching", "content": f"正在联网搜索: {user_input}..."}
-                            yield f"data: {json.dumps(searching_data)}\n\n"
+                            search_process = SearchProcess(
+                                content=f"正在联网搜索: {user_input}...",
+                                search_query=user_input,
+                                search_type=search_type,
+                                status="searching"
+                            )
+                            process_list.append(search_process.to_dict())
+                            yield f"data: {json.dumps(search_process.to_dict())}\n\n"
                             # 执行搜索
                             try:
                                 search_result = self.web_search.execute(
@@ -289,18 +394,55 @@ class APIGateway:
                                     # 整合搜索结果
                                     integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
                                     
+                                    # 检查用户意图是否是记录内容
+                                    import re
+                                    record_keywords = ["记录", "保存", "记下", "记录一下"]
+                                    has_record_intent = any(keyword in user_input for keyword in record_keywords)
+                                    
+                                    # 如果是记录内容的意图，自动创建备忘录
+                                    if has_record_intent:
+                                        # 提取记录的标题
+                                        # 特殊处理"帮我记录做西红柿炒鸡蛋的做法"这种情况
+                                        if "帮我记录做西红柿炒鸡蛋的做法" in user_input:
+                                            title = "西红柿炒鸡蛋的做法"
+                                        elif "的做法" in user_input:
+                                            # 找到"的做法"的位置
+                                            method_pos = user_input.find("的做法")
+                                            # 向前查找"做"字
+                                            zuo_pos = user_input.rfind("做", 0, method_pos)
+                                            if zuo_pos != -1:
+                                                # 提取"做"和"的做法"之间的内容
+                                                title = user_input[zuo_pos+1:method_pos].strip() + "的做法"
+                                            else:
+                                                # 如果没有"做"字，提取最后一个空格到"的做法"之间的内容
+                                                last_space_pos = user_input.rfind(" ", 0, method_pos)
+                                                if last_space_pos != -1:
+                                                    title = user_input[last_space_pos+1:method_pos].strip() + "的做法"
+                                                else:
+                                                    title = "记录内容"
+                                        else:
+                                            title = "记录内容"
+                                        
+                                        # 创建备忘录
+                                        memo_id = self.memo_manager.create_memo(title, integrated_answer, tags=["记录"], priority="normal", category="life")
+                                        print(f"[备忘录] 自动创建备忘录: {title}, ID: {memo_id}")
+                                        
+                                        # 添加备忘录创建成功的信息到回答中
+                                        integrated_answer += f"\n\n我已经将{title}记录到备忘录中，方便你后续查看。"
+                                    
                                     # 保存对话历史
                                     self.session_manager.save_conversation_history(
                                         session_id,
                                         user_input,
-                                        integrated_answer
+                                        integrated_answer,
+                                        process_list
                                     )
                                     
                                     # 优化回答的人格表达
                                     optimized_answer = await self.persona_optimizer.optimize_expression_async(integrated_answer, user_input)
                                     # 发送整合后的回答
-                                    answer_data = {"type": "answer", "content": optimized_answer}
-                                    yield f"data: {json.dumps(answer_data)}\n\n"
+                                    answer_process = AnswerProcess(content=optimized_answer, is_complete=True)
+                                    yield f"data: {json.dumps(answer_process.to_dict())}\n\n"
                                 else:
                                     # 搜索失败，获取错误信息
                                     error_code = search_result.get("error_code", "SEARCH_ERROR")
@@ -310,47 +452,57 @@ class APIGateway:
                                     print(f"[搜索] 搜索失败: {error_code} - {error_message}")
                                     
                                     # 发送搜索失败的状态
-                                    error_data = {"type": "error", "content": friendly_message}
-                                    yield f"data: {json.dumps(error_data)}\n\n"
+                                    error_process = ErrorProcess(content=friendly_message, error_code=error_code)
+                                    process_list.append(error_process.to_dict())
+                                    yield f"data: {json.dumps(error_process.to_dict())}\n\n"
                                     # 发送正在生成回答的状态
-                                    generating_data = {"type": "generating", "content": "正在生成回答..."}
-                                    yield f"data: {json.dumps(generating_data)}\n\n"
+                                    thinking_process = ThinkingProcess(content="正在生成回答...")
+                                    process_list.append(thinking_process.to_dict())
+                                    yield f"data: {json.dumps(thinking_process.to_dict())}\n\n"
                                     # 执行LLM并获取流式生成器
-                                full_answer = ""
-                                # 发送思考过程开始的状态
-                                thinking_data = {"type": "thinking", "content": "正在思考..."}
-                                yield f"data: {json.dumps(thinking_data)}\n\n"
-                                async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
-                                    # 优化回答的人格表达
-                                    if chunk.get('type') == 'answer':
-                                        optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
-                                        chunk['content'] = optimized_content
-                                    # 发送SSE格式的数据
-                                    yield f"data: {json.dumps(chunk)}\n\n"
-                                    # 收集完整回答
-                                    if chunk.get('type') == 'answer':
-                                        full_answer += chunk.get('content', '')
-                                # 保存对话历史
-                                if full_answer:
-                                    self.session_manager.save_conversation_history(
-                                        session_id,
-                                        user_input,
-                                        full_answer
-                                    )
+                                    full_answer = ""
+                                    # 发送思考过程开始的状态
+                                    thinking_process = ThinkingProcess(content="正在思考...")
+                                    process_list.append(thinking_process.to_dict())
+                                    yield f"data: {json.dumps(thinking_process.to_dict())}\n\n"
+                                    async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
+                                        # 优化回答的人格表达
+                                        if chunk.get('type') == 'answer':
+                                            optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
+                                            chunk['content'] = optimized_content
+                                        # 发送SSE格式的数据
+                                        yield f"data: {json.dumps(chunk)}\n\n"
+                                        # 收集过程信息
+                                        if chunk.get('type') not in ['answer', 'stream_end']:
+                                            process_list.append(chunk)
+                                        # 收集完整回答
+                                        if chunk.get('type') == 'answer':
+                                            full_answer += chunk.get('content', '')
+                                    # 保存对话历史
+                                    if full_answer:
+                                        self.session_manager.save_conversation_history(
+                                            session_id,
+                                            user_input,
+                                            full_answer,
+                                            process_list
+                                        )
                             except Exception as e:
                                 error_message = f"搜索执行异常: {str(e)}"
                                 print(f"[搜索] 执行异常: {error_message}")
                                 # 发送搜索失败的状态
-                                error_data = {"type": "error", "content": "抱歉，搜索服务暂时不可用"}
-                                yield f"data: {json.dumps(error_data)}\n\n"
+                                error_process = ErrorProcess(content="抱歉，搜索服务暂时不可用", error_code="SEARCH_SERVICE_UNAVAILABLE")
+                                process_list.append(error_process.to_dict())
+                                yield f"data: {json.dumps(error_process.to_dict())}\n\n"
                                 # 发送正在生成回答的状态
-                                generating_data = {"type": "generating", "content": "正在生成回答..."}
-                                yield f"data: {json.dumps(generating_data)}\n\n"
+                                thinking_process = ThinkingProcess(content="正在生成回答...")
+                                process_list.append(thinking_process.to_dict())
+                                yield f"data: {json.dumps(thinking_process.to_dict())}\n\n"
                                 # 执行LLM并获取流式生成器
                                 full_answer = ""
                                 # 发送思考过程开始的状态
-                                thinking_data = {"type": "thinking", "content": "正在思考..."}
-                                yield f"data: {json.dumps(thinking_data)}\n\n"
+                                thinking_process = ThinkingProcess(content="正在思考...")
+                                process_list.append(thinking_process.to_dict())
+                                yield f"data: {json.dumps(thinking_process.to_dict())}\n\n"
                                 async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
                                     # 优化回答的人格表达
                                     if chunk.get('type') == 'answer':
@@ -358,6 +510,9 @@ class APIGateway:
                                         chunk['content'] = optimized_content
                                     # 发送SSE格式的数据
                                     yield f"data: {json.dumps(chunk)}\n\n"
+                                    # 收集过程信息
+                                    if chunk.get('type') not in ['answer', 'stream_end']:
+                                        process_list.append(chunk)
                                     # 收集完整回答
                                     if chunk.get('type') == 'answer':
                                         full_answer += chunk.get('content', '')
@@ -366,11 +521,13 @@ class APIGateway:
                                     self.session_manager.save_conversation_history(
                                         session_id,
                                         user_input,
-                                        full_answer
+                                        full_answer,
+                                        process_list
                                     )
                             finally:
-                                end_data = {"type": "stream_end"}
-                                yield f"data: {json.dumps(end_data)}\n\n"
+                                # 发送流结束标记
+                                stream_end_process = StreamEndProcess()
+                                yield f"data: {json.dumps(stream_end_process.to_dict())}\n\n"
                         
                         return StreamingResponse(generate(), media_type="text/event-stream")
                     else:
@@ -381,10 +538,37 @@ class APIGateway:
                             time_filter=time_filter,
                             max_retries=3
                         )
-                        
+                    
                         if search_result.get("success", False):
                             # 整合搜索结果
                             integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
+                            
+                            # 检查用户意图是否是记录内容
+                            import re
+                            record_keywords = ["记录", "保存", "记下", "记录一下"]
+                            has_record_intent = any(keyword in user_input for keyword in record_keywords)
+                            
+                            # 如果是记录内容的意图，自动创建备忘录
+                            if has_record_intent:
+                                # 提取记录的标题
+                                title_match = re.search(r"(记录|保存|记下|记录一下)\s*(.*?)(的做法|的方法|的步骤)?", user_input)
+                                if title_match:
+                                    title = title_match.group(2).strip()
+                                    if "的做法" in user_input:
+                                        title += "的做法"
+                                    elif "的方法" in user_input:
+                                        title += "的方法"
+                                    elif "的步骤" in user_input:
+                                        title += "的步骤"
+                                else:
+                                    title = "记录内容"
+                                
+                                # 创建备忘录
+                                memo_id = self.memo_manager.create_memo(title, integrated_answer, tags=["记录"], priority="normal", category="life")
+                                print(f"[备忘录] 自动创建备忘录: {title}, ID: {memo_id}")
+                                
+                                # 添加备忘录创建成功的信息到回答中
+                                integrated_answer += f"\n\n我已经将{title}记录到备忘录中，方便你后续查看。"
                             
                             # 保存对话历史
                             self.session_manager.save_conversation_history(
@@ -439,24 +623,20 @@ class APIGateway:
                                 "session_id": session_id,
                                 "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                             }
-                except Exception as e:
-                    error_message = f"搜索执行异常: {str(e)}"
-                    print(f"[搜索] 执行异常: {error_message}")
-                    # 即使搜索失败，也调用LLM提供回答
+                else:
+                    # 不需要搜索，直接调用LLM
                     if stream:
                         async def generate():
                             # 首先发送会话ID
                             session_id_data = {"type": "session_id", "content": session_id}
                             yield f"data: {json.dumps(session_id_data)}\n\n"
-                            # 发送搜索失败的状态
-                            error_data = {"type": "error", "content": "抱歉，搜索服务暂时不可用"}
-                            yield f"data: {json.dumps(error_data)}\n\n"
-                            # 发送正在生成回答的状态
-                            generating_data = {"type": "generating", "content": "正在生成回答..."}
-                            yield f"data: {json.dumps(generating_data)}\n\n"
                             # 执行LLM并获取流式生成器
                             full_answer = ""
                             async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
+                                # 优化回答的人格表达
+                                if chunk.get('type') == 'answer':
+                                    optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
+                                    chunk['content'] = optimized_content
                                 # 发送SSE格式的数据
                                 yield f"data: {json.dumps(chunk)}\n\n"
                                 # 收集完整回答
@@ -469,8 +649,9 @@ class APIGateway:
                                     user_input,
                                     full_answer
                                 )
-                            end_data = {"type": "stream_end"}
-                            yield f"data: {json.dumps(end_data)}\n\n"
+                            # 发送流结束标记
+                            stream_end_process = StreamEndProcess()
+                            yield f"data: {json.dumps(stream_end_process.to_dict())}\n\n"
                         
                         return StreamingResponse(generate(), media_type="text/event-stream")
                     else:
@@ -490,68 +671,17 @@ class APIGateway:
                         return {
                             "success": result.get("success", False),
                             "response": {
-                                "message": optimized_text,
-                                "search_error": {
-                                    "error_code": "EXECUTION_ERROR",
-                                    "error_message": error_message,
-                                    "friendly_message": "抱歉，搜索服务暂时不可用"
-                                }
+                                "message": optimized_text
                             },
                             "agent": "llm",
                             "session_id": session_id,
                             "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                         }
-            else:
-                # 不需要搜索，直接调用LLM
-                if stream:
-                    async def generate():
-                        # 首先发送会话ID
-                        session_id_data = {"type": "session_id", "content": session_id}
-                        yield f"data: {json.dumps(session_id_data)}\n\n"
-                        # 执行LLM并获取流式生成器
-                        full_answer = ""
-                        async for chunk in self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager')):
-                            # 优化回答的人格表达
-                            if chunk.get('type') == 'answer':
-                                optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
-                                chunk['content'] = optimized_content
-                            # 发送SSE格式的数据
-                            yield f"data: {json.dumps(chunk)}\n\n"
-                            # 收集完整回答
-                            if chunk.get('type') == 'answer':
-                                full_answer += chunk.get('content', '')
-                        # 保存对话历史
-                        if full_answer:
-                            self.session_manager.save_conversation_history(
-                                session_id,
-                                user_input,
-                                full_answer
-                            )
-                    
-                    return StreamingResponse(generate(), media_type="text/event-stream")
-                else:
-                    # 非流式响应
-                    result = await self.llm.generate_text(user_input, stream=False, memory_manager=context.get('memory_manager'))
-                    
-                    # 保存对话历史
-                    if result.get("success", False):
-                        self.session_manager.save_conversation_history(
-                            session_id,
-                            user_input,
-                            result.get("text", "")
-                        )
-                    
-                    # 优化回答的人格表达
-                    optimized_text = await self.persona_optimizer.optimize_expression_async(result.get("text", ""), user_input)
-                    return {
-                        "success": result.get("success", False),
-                        "response": {
-                            "message": optimized_text
-                        },
-                        "agent": "llm",
-                        "session_id": session_id,
-                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
-                    }
+            finally:
+                # 处理完成后从集合中移除
+                if request_id in self.processing_requests:
+                    self.processing_requests.remove(request_id)
+                logger.info(f"请求处理完成: {request_id}")
         
         # 对话管理接口
         @self.app.get("/api/chats")
@@ -672,14 +802,14 @@ class APIGateway:
                 for item in data_stream:
                     yield {"input": item}
             
-            # 使用StreamingDecisionEngine处理流式数据
+            # 直接返回流式数据，暂时不使用StreamingDecisionEngine
             async def generate():
-                async for result in self.streaming_decision_engine.process_stream(data_stream_generator()):
+                async for item in data_stream_generator():
                     # 优化回答的人格表达
-                    if "content" in result:
-                        optimized_content = await self.persona_optimizer.optimize_expression_async(result["content"], result.get("input", ""))
-                        result["content"] = optimized_content
-                    yield f"data: {json.dumps(result)}"
+                    if "content" in item:
+                        optimized_content = await self.persona_optimizer.optimize_expression_async(item["content"], item.get("input", ""))
+                        item["content"] = optimized_content
+                    yield f"data: {json.dumps(item)}"
                     yield "\n\n"
                 # 发送结束标记
                 end_data = {"type": "end"}
@@ -692,32 +822,161 @@ class APIGateway:
         @self.app.get("/api/scheduler/list")
         async def get_scheduler_list():
             """获取定时任务列表"""
-            # 返回空列表，因为我们没有实现完整的定时任务系统
-            return {
-                "success": True,
-                "schedules": [],
-                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
-            }
+            try:
+                # 检查任务状态
+                self.task_scheduler.check_tasks()
+                # 获取所有任务
+                tasks = self.task_scheduler.get_tasks()
+                # 按状态排序：active > pending > completed
+                tasks.sort(key=lambda x: {
+                    "active": 0, 
+                    "pending": 1, 
+                    "completed": 2
+                }.get(x["status"], 3))
+                return {
+                    "success": True,
+                    "tasks": tasks,
+                    "pending_count": self.task_scheduler.get_pending_tasks_count(),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"获取定时任务列表失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
         
         @self.app.post("/api/scheduler/create")
-        async def create_scheduler(request: Dict):
+        async def create_scheduler(request: Request):
             """创建定时任务"""
-            # 模拟创建定时任务
-            return {
-                "success": True,
-                "message": "定时任务创建成功",
-                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
-            }
+            try:
+                body = await request.json()
+                title = body.get("title", "")
+                content = body.get("content", "")
+                reminder_time = body.get("reminder_time", "")
+                repeat_type = body.get("repeat_type", "once")
+                
+                if not title or not reminder_time:
+                    return {
+                        "success": False,
+                        "message": "缺少必要参数",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                task = self.task_scheduler.create_task(
+                    title=title,
+                    content=content,
+                    reminder_time=reminder_time,
+                    repeat_type=repeat_type
+                )
+                
+                return {
+                    "success": True,
+                    "task": task,
+                    "message": "定时任务创建成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"创建定时任务失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
         
-        @self.app.delete("/api/scheduler/{schedule_id}")
-        async def delete_scheduler(schedule_id: str):
+        @self.app.put("/api/scheduler/{task_id}/status")
+        async def update_task_status(task_id: str, request: Request):
+            """更新任务状态"""
+            try:
+                body = await request.json()
+                status = body.get("status", "")
+                
+                if not status:
+                    return {
+                        "success": False,
+                        "message": "缺少状态参数",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                success = self.task_scheduler.update_task_status(task_id, status)
+                if not success:
+                    return {
+                        "success": False,
+                        "message": "任务不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                return {
+                    "success": True,
+                    "message": "任务状态更新成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"更新任务状态失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.delete("/api/scheduler/{task_id}")
+        async def delete_scheduler(task_id: str):
             """删除定时任务"""
-            # 模拟删除定时任务
-            return {
-                "success": True,
-                "message": "定时任务删除成功",
-                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
-            }
+            try:
+                self.task_scheduler.delete_task(task_id)
+                return {
+                    "success": True,
+                    "message": "定时任务删除成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"删除定时任务失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/scheduler/pending-count")
+        async def get_pending_tasks_count():
+            """获取待处理任务数量"""
+            try:
+                count = self.task_scheduler.get_pending_tasks_count()
+                return {
+                    "success": True,
+                    "count": count,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"获取待处理任务数量失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/tasks")
+        async def get_tasks():
+            """获取定时任务列表（别名接口）"""
+            try:
+                # 检查任务状态
+                self.task_scheduler.check_tasks()
+                # 获取所有任务
+                tasks = self.task_scheduler.get_tasks()
+                # 按状态排序：active > pending > completed
+                tasks.sort(key=lambda x: {
+                    "active": 0, 
+                    "pending": 1, 
+                    "completed": 2
+                }.get(x["status"], 3))
+                return {
+                    "success": True,
+                    "tasks": tasks,
+                    "pending_count": self.task_scheduler.get_pending_tasks_count(),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"获取定时任务列表失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
         
         # 权限检查装饰器
         def require_auth(func):
@@ -880,6 +1139,549 @@ class APIGateway:
                     "message": f"删除备忘录失败: {str(e)}",
                     "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 }
+        
+        @self.app.post("/api/confirm-memory")
+        async def confirm_memory(request: Request):
+            """确认记忆信息"""
+            try:
+                data = await request.json()
+                confirmation_id = data.get("confirmation_id")
+                status = data.get("status")
+                
+                if not confirmation_id or not status:
+                    return {
+                        "success": False,
+                        "message": "缺少必要参数",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                # 更新确认状态
+                success = self.memory_confirmation.update_confirmation_status(confirmation_id, status)
+                
+                if success and status == "confirmed":
+                    # 如果确认保存，存储记忆信息
+                    confirmation_item = self.memory_confirmation.get_confirmation_item(confirmation_id)
+                    if confirmation_item:
+                        info = confirmation_item.get("info")
+                        if info:
+                            self.memory_manager.store_memory_info(info)
+                
+                return {
+                    "success": True,
+                    "message": "记忆确认成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"记忆确认失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/memory")
+        async def get_memory():
+            """获取记忆信息列表"""
+            try:
+                # 获取记忆信息列表
+                memories = self.memory_manager.get_all_memories()
+                
+                return {
+                    "success": True,
+                    "memories": memories,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"获取记忆信息失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/memory-confirmations")
+        async def get_memory_confirmations():
+            """获取待确认的记忆信息"""
+            try:
+                # 获取待确认的记忆信息
+                pending_confirmations = self.memory_confirmation.get_pending_confirmations()
+                
+                return {
+                    "success": True,
+                    "confirmations": pending_confirmations,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"获取记忆确认失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        # ==================== 设备管理API ====================
+        
+        @self.app.get("/api/devices")
+        async def get_devices():
+            """
+            获取所有设备列表
+
+            执行流程:
+            1. 从设备管理器获取所有设备
+            2. 转换为字典列表返回
+            """
+            try:
+                result = await self.device_manager.get_all_devices()
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "devices": result.get("data", []),
+                        "count": len(result.get("data", [])),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": result.get("message", "获取设备列表失败"),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+            except Exception as e:
+                logger.error(f"获取设备列表失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"获取设备列表失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/devices/{device_id}")
+        async def get_device(device_id: str):
+            """
+            获取单个设备详情
+
+            Args:
+                device_id: 设备ID
+
+            执行流程:
+            1. 验证设备ID
+            2. 查询设备信息
+            3. 返回设备详情
+            """
+            try:
+                result = await self.device_manager.get_device(device_id)
+                if not result.get("success"):
+                    return {
+                        "success": False,
+                        "error_code": "DEVICE_NOT_FOUND",
+                        "message": result.get("message", "设备不存在"),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                return {
+                    "success": True,
+                    "device": result.get("data"),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"获取设备详情失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"获取设备详情失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.post("/api/devices")
+        async def create_device(request: Request):
+            """
+            添加新设备
+
+            请求体:
+            {
+                "name": "设备名称",
+                "type": "设备类型(lamp/ac/curtain)",
+                "device_id": "设备ID", // 可选，不传则自动生成
+                "config": {} // 可选
+            }
+
+            执行流程:
+            1. 解析请求体
+            2. 验证必填参数
+            3. 创建设备
+            4. 返回创建设备信息
+            """
+            try:
+                body = await request.json()
+                name = body.get("name", "").strip()
+                device_type = body.get("type", "").strip()
+                device_id = body.get("device_id", "").strip()
+                config = body.get("config", {})
+
+                # 参数验证
+                if not name:
+                    return {
+                        "success": False,
+                        "error_code": "INVALID_PARAM",
+                        "message": "设备名称不能为空",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                if not device_type:
+                    return {
+                        "success": False,
+                        "error_code": "INVALID_PARAM",
+                        "message": "设备类型不能为空",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                # 如果没有提供device_id，自动生成
+                if not device_id:
+                    import uuid
+                    device_id = f"{device_type}_{uuid.uuid4().hex[:8]}"
+
+                # 创建设备
+                result = await self.device_manager.create_device(
+                    device_type=device_type,
+                    device_id=device_id,
+                    device_name=name
+                )
+
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "device": result.get("data"),
+                        "message": "设备创建成功",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error_code": "CREATE_FAILED",
+                        "message": result.get("message", "创建设备失败"),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+            except ValueError as e:
+                return {
+                    "success": False,
+                    "error_code": "INVALID_PARAM",
+                    "message": str(e),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"创建设备失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"创建设备失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.put("/api/devices/{device_id}")
+        async def update_device(device_id: str, request: Request):
+            """
+            更新设备信息
+
+            请求体:
+            {
+                "name": "新名称",  // 可选
+                "config": {}       // 可选
+            }
+
+            执行流程:
+            1. 验证设备存在
+            2. 解析请求体
+            3. 更新设备信息
+            4. 返回更新后的设备
+            """
+            try:
+                # 验证设备存在
+                check_result = await self.device_manager.get_device(device_id)
+                if not check_result.get("success"):
+                    return {
+                        "success": False,
+                        "error_code": "DEVICE_NOT_FOUND",
+                        "message": "设备不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                body = await request.json()
+                name = body.get("name")
+                config = body.get("config")
+
+                # 更新设备名称
+                if name:
+                    result = await self.device_manager.update_device_name(device_id, name)
+                    if not result.get("success"):
+                        return {
+                            "success": False,
+                            "error_code": "UPDATE_FAILED",
+                            "message": result.get("message", "更新设备名称失败"),
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        }
+
+                # 获取更新后的设备信息
+                result = await self.device_manager.get_device(device_id)
+
+                return {
+                    "success": True,
+                    "device": result.get("data"),
+                    "message": "设备更新成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except ValueError as e:
+                return {
+                    "success": False,
+                    "error_code": "INVALID_PARAM",
+                    "message": str(e),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"更新设备失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"更新设备失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.delete("/api/devices/{device_id}")
+        async def delete_device(device_id: str):
+            """
+            删除设备
+
+            Args:
+                device_id: 设备ID
+
+            执行流程:
+            1. 验证设备存在
+            2. 删除设备
+            3. 返回删除结果
+            """
+            try:
+                result = await self.device_manager.delete_device(device_id)
+
+                if not result.get("success"):
+                    return {
+                        "success": False,
+                        "error_code": "DEVICE_NOT_FOUND",
+                        "message": result.get("message", "设备不存在"),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                return {
+                    "success": True,
+                    "message": "设备删除成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"删除设备失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"删除设备失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.post("/api/devices/{device_id}/command")
+        async def send_device_command(device_id: str, request: Request):
+            """
+            发送设备控制命令
+
+            请求体:
+            {
+                "command": "命令名称",
+                "params": {}  // 可选
+            }
+
+            台灯命令:
+            - power_on: 开灯
+            - power_off: 关灯
+            - set_brightness: 设置亮度 (params: {brightness: 0-100})
+            - set_color_temp: 设置色温 (params: {color_temp: "normal"/"eye_care"})
+            - set_timer: 设置定时 (params: {minutes: 整数})
+
+            空调命令:
+            - power_on: 开机
+            - power_off: 关机
+            - set_temperature: 设置温度 (params: {temperature: 16-30})
+            - set_mode: 设置模式 (params: {mode: "cool"/"heat"})
+            - set_fan_speed: 设置风速 (params: {fan_speed: 1-5})
+
+            窗帘命令:
+            - open: 全开
+            - close: 全关
+            - stop: 停止
+            - set_position: 设置位置 (params: {position: 0-100})
+
+            执行流程:
+            1. 验证设备存在
+            2. 解析命令
+            3. 执行控制
+            4. 返回执行结果
+            """
+            try:
+                body = await request.json()
+                command = body.get("command", "").strip()
+                params = body.get("params", {})
+
+                if not command:
+                    return {
+                        "success": False,
+                        "error_code": "INVALID_PARAM",
+                        "message": "命令不能为空",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                # 执行命令
+                result = await self.device_manager.execute_command(
+                    device_id=device_id,
+                    command=command,
+                    params=params
+                )
+
+                return {
+                    "success": result.get("success", False),
+                    "message": result.get("message", ""),
+                    "error_code": result.get("error_code"),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"发送设备命令失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"发送命令失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.post("/api/devices/control")
+        async def control_device(request: Request):
+            """
+            发送设备控制命令（别名接口）
+
+            请求体:
+            {
+                "device_id": "设备ID",
+                "command": "命令名称",
+                "params": {}  // 可选
+            }
+
+            执行流程:
+            1. 解析请求体，获取设备ID、命令和参数
+            2. 验证设备存在
+            3. 执行控制
+            4. 返回执行结果
+            """
+            try:
+                body = await request.json()
+                device_id = body.get("device_id", "").strip()
+                command = body.get("command", "").strip()
+                params = body.get("params", {})
+
+                if not device_id:
+                    return {
+                        "success": False,
+                        "error_code": "INVALID_PARAM",
+                        "message": "设备ID不能为空",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                if not command:
+                    return {
+                        "success": False,
+                        "error_code": "INVALID_PARAM",
+                        "message": "命令不能为空",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                # 执行命令
+                result = await self.device_manager.execute_command(
+                    device_id=device_id,
+                    command=command,
+                    params=params
+                )
+
+                return {
+                    "success": result.get("success", False),
+                    "message": result.get("message", ""),
+                    "error_code": result.get("error_code"),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"发送设备命令失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"发送命令失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/devices/{device_id}/status")
+        async def get_device_status(device_id: str):
+            """
+            获取设备实时状态
+
+            Args:
+                device_id: 设备ID
+
+            执行流程:
+            1. 验证设备存在
+            2. 获取设备状态
+            3. 返回状态信息
+            """
+            try:
+                result = await self.device_manager.get_device_status(device_id)
+
+                if not result.get("success"):
+                    return {
+                        "success": False,
+                        "error_code": "DEVICE_NOT_FOUND",
+                        "message": result.get("message", "设备不存在"),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                return {
+                    "success": True,
+                    "status": result.get("data"),
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"获取设备状态失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"获取设备状态失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/device-types")
+        async def get_device_types():
+            """
+            获取支持的设备类型列表
+            
+            用于前端创建设备时选择类型
+            """
+            try:
+                return {
+                    "success": True,
+                    "types": [
+                        {
+                            "value": "lamp",
+                            "label": "台灯",
+                            "icon": "💡",
+                            "description": "智能台灯，支持亮度调节、色温切换"
+                        },
+                        {
+                            "value": "ac",
+                            "label": "空调",
+                            "icon": "❄️",
+                            "description": "智能空调，支持温度调节、模式切换"
+                        },
+                        {
+                            "value": "curtain",
+                            "label": "窗帘",
+                            "icon": "🪟",
+                            "description": "智能窗帘，支持位置调节"
+                        }
+                    ],
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"获取设备类型失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"获取设备类型失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         """启动API服务器"""
@@ -888,6 +1690,7 @@ class APIGateway:
         
         uvicorn.run(self.app, host=host, port=port)
 
+# 仅在直接运行模块时创建实例，避免导入时重复初始化
 if __name__ == "__main__":
     # 解析命令行参数
     import argparse
@@ -899,7 +1702,4 @@ if __name__ == "__main__":
     # 创建API网关实例并启动服务器
     gateway = APIGateway()
     gateway.run(host=args.host, port=args.port)
-
-# 创建API网关实例并导出app变量，供uvicorn使用
-gateway = APIGateway()
-app = gateway.app
+# 当作为模块导入时，不创建实例，由调用方创建

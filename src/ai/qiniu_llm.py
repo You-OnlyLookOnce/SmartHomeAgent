@@ -7,6 +7,8 @@ from typing import Dict, Optional, Any, List
 
 # 导入人设管理模块
 from core.persona_manager import persona_manager
+# 导入流式过程数据结构
+from core.streaming_process import create_process, ThinkingProcess, AnswerProcess, ErrorProcess, StreamEndProcess
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -52,11 +54,7 @@ class QiniuLLM:
         
         # 初始化人设管理器
         self.persona_manager = persona_manager
-        # 加载人设文件
-        if self.persona_manager.load_persona():
-            logger.info("[人设管理] 人设文件加载成功")
-        else:
-            logger.warning("[人设管理] 人设文件加载失败，使用默认值")
+        # 不再重复加载人设文件，全局实例已经在导入时加载
         
         # 记录初始化信息（不暴露敏感信息）
         logger.info(f"QiniuLLM initialized with model: {self.model}")
@@ -669,10 +667,8 @@ class QiniuLLM:
                                                 if "error" in data:
                                                     # 处理API错误
                                                     error_message = data["error"].get("message", "API error")
-                                                    yield {
-                                                        "type": "error",
-                                                        "content": f"API错误: {error_message}"
-                                                    }
+                                                    error_process = ErrorProcess(content=f"API错误: {error_message}", error_code="API_ERROR")
+                                                    yield error_process.to_dict()
                                                 elif "choices" in data and len(data["choices"]) > 0:
                                                     choice = data["choices"][0]
                                                     if "delta" in choice:
@@ -681,25 +677,27 @@ class QiniuLLM:
                                                             content = delta["content"]
                                                             has_content = True
                                                             # 实时返回流式数据
-                                                            yield {
-                                                                "type": "answer",
-                                                                "content": content
-                                                            }
+                                                            answer_process = AnswerProcess(content=content, is_complete=False)
+                                                            yield answer_process.to_dict()
                                                         elif "tool_calls" in delta:
                                                             # 处理工具调用
                                                             tool_calls = delta["tool_calls"]
                                                             has_content = True
-                                                            yield {
-                                                                "type": "tool_call",
-                                                                "tool_calls": tool_calls
-                                                            }
+                                                            # 创建工具调用过程
+                                                            tool_call_content = f"正在调用工具: {tool_calls[0]['function']['name']}"
+                                                            tool_process = create_process(
+                                                                "mcp_tool",
+                                                                content=tool_call_content,
+                                                                tool_name=tool_calls[0]['function']['name'],
+                                                                parameters=tool_calls[0]['function']['arguments']
+                                                            )
+                                                            yield tool_process.to_dict()
                                                         elif "role" in delta:
                                                             # 处理角色信息
                                                             role = delta["role"]
-                                                            yield {
-                                                                "type": "role",
-                                                                "content": role
-                                                            }
+                                                            # 创建思考过程
+                                                            thinking_process = ThinkingProcess(content=f"角色: {role}")
+                                                            yield thinking_process.to_dict()
                                             except Exception as e:
                                                 logger.error(f"Failed to parse SSE data: {e}")
                                                 # 打印失败的数据，以便调试
@@ -713,27 +711,21 @@ class QiniuLLM:
                         # 因为即使buffer不为空，也可能是正常的响应结束
                         # 如果没有收到任何内容，返回一个错误消息
                         if not has_content:
-                            yield {
-                                "type": "error",
-                                "content": "API调用失败，未收到任何响应"
-                            }
-                        yield {
-                            "type": "stream_end"
-                        }
+                            error_process = ErrorProcess(content="API调用失败，未收到任何响应", error_code="NO_RESPONSE")
+                            yield error_process.to_dict()
+                        # 创建流结束过程
+                        stream_end_process = StreamEndProcess()
+                        yield stream_end_process.to_dict()
                     except Exception as e:
                         logger.error(f"Failed to process stream response: {e}")
-                        yield {
-                            "type": "error",
-                            "content": f"处理响应流失败: {str(e)}"
-                        }
+                        error_process = ErrorProcess(content=f"处理响应流失败: {str(e)}", error_code="STREAM_ERROR")
+                        yield error_process.to_dict()
         except Exception as e:
             logger.error(f"Exception during API call: {e}")
             import traceback
             traceback.print_exc()
-            yield {
-                "type": "error",
-                "content": f"API调用失败: {str(e)}"
-            }
+            error_process = ErrorProcess(content=f"API调用失败: {str(e)}", error_code="API_CALL_ERROR")
+            yield error_process.to_dict()
     
     async def _chat_completion_non_stream(self, messages: list, max_tokens: int = 1024, tools: list = None, tool_choice: str = "auto"):
         """聊天完成（非流式响应）"""

@@ -70,7 +70,12 @@ app = gateway.app
 
 if __name__ == "__main__":
     # 启动API服务器
-    print(f"启动服务在端口 {port}...")
+    url = f"http://localhost:{port}"
+    print(f"启动服务在 {url}...")
+    print(f"请点击以下链接进入网页: {url}")
     import logging
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    gateway.run(host="localhost", port=port)
+    
+    # 使用uvicorn启动FastAPI应用
+    import uvicorn
+    uvicorn.run("app:app", host="localhost", port=port, reload=False)

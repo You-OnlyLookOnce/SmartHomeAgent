@@ -6,10 +6,12 @@
 
 ## 系统架构
 
-- **AI Agent**：悦悦 (YueYue) 智能助手，集成了设备控制、任务管理、笔记管理、安全监控等功能
+- **AI Agent**：悦悦 (YueYue) 智能助手，基于LLM驱动的Function Calling架构，集成了设备控制、任务管理、笔记管理、安全监控等功能
 - **后端服务**：API网关、负载均衡、数据库集成、定时任务系统
 - **安全模块**：认证授权、权限控制、数据加密、敏感信息检测
 - **前端界面**：晨光主题UI，温暖专业的用户界面
+- **MCP工具模块**：统一的工具管理和执行系统
+- **Qiniu Cloud AI集成**：实时推理和全网搜索能力
 
 ## 环境搭建
 
@@ -54,14 +56,13 @@ python app.py
 
 ### 4. 打开前端网页
 
-```bash
-# 启动前端服务器
-cd src/frontend
-python -m http.server 8080
+启动后端服务后，直接在浏览器中访问：
 
-# 或直接在浏览器中打开
-# file:///path/to/Home-AI-Agent/src/frontend/templates/index.html
 ```
+http://localhost:8005/
+```
+
+前端页面将通过后端服务自动加载，无需单独启动前端服务器。
 
 ## 功能使用
 
@@ -75,8 +76,9 @@ python -m http.server 8080
 - 读取传感器："读取温度传感器"
 
 **API接口**：
-- POST `/api/device/control`：控制设备
-- GET `/api/device/status/{device_id}`：获取设备状态
+- POST `/api/devices/{device_id}/command`：控制设备
+- GET `/api/devices/{device_id}/status`：获取设备状态
+- GET `/api/devices`：获取设备列表
 
 ### 2. 任务管理
 
@@ -88,6 +90,10 @@ python -m http.server 8080
 **API接口**：
 - POST `/api/reminder/create`：创建提醒
 - GET `/api/reminder/list/{user_id}`：获取提醒列表
+- GET `/api/scheduler/list`：获取定时任务列表
+- POST `/api/scheduler/create`：创建定时任务
+- PUT `/api/scheduler/{task_id}/status`：更新任务状态
+- DELETE `/api/scheduler/{task_id}`：删除定时任务
 
 ### 3. AI笔记
 
@@ -96,6 +102,13 @@ python -m http.server 8080
 - 查看记忆："查看我之前的笔记"
 - 搜索："搜索关于购物的笔记"
 
+**API接口**：
+- GET `/api/memos`：获取备忘录列表
+- POST `/api/memos`：创建备忘录
+- GET `/api/memos/{memo_id}`：获取备忘录详情
+- PUT `/api/memos/{memo_id}`：更新备忘录
+- DELETE `/api/memos/{memo_id}`：删除备忘录
+
 ### 4. 安全监控
 
 **支持的安全命令**：
@@ -103,12 +116,27 @@ python -m http.server 8080
 - 监控："开始监控"
 - 告警："发送安全告警"
 
-### 5. 系统管理
+### 5. 记忆管理
+
+**支持的记忆管理命令**：
+- 查看人格文件："查看我的人格设置"
+- 编辑记忆："编辑我的记忆"
+- 记忆蒸馏："执行记忆蒸馏"
+
+**API接口**：
+- GET `/api/memory/soul`：获取人格文件
+- POST `/api/memory/soul`：更新人格文件
+- GET `/api/memory/long-term`：获取长期记忆
+- POST `/api/memory/long-term`：更新长期记忆
+- POST `/api/memory/distill`：执行记忆蒸馏
+
+### 6. 系统管理
 
 **API接口**：
 - GET `/api/agent/status`：获取Agent状态
 - GET `/api/health`：健康检查
 - POST `/api/chat`：通用聊天接口
+- GET `/api/test`：测试接口
 
 ## 核心功能
 
@@ -142,9 +170,11 @@ python -m http.server 8080
 ## 技术栈
 
 - **后端**：Python 3.11, FastAPI, SQLite
-- **AI**：七牛云LLM服务
+- **AI**：七牛云LLM服务（支持Function Calling）
 - **前端**：HTML, CSS, JavaScript
 - **安全**：JWT认证, 数据加密
+- **架构**：LLM驱动的Function Calling, MCP工具模块
+- **集成**：Qiniu Cloud AI实时推理和搜索API
 
 ## 项目结构
 
@@ -156,6 +186,10 @@ Home-AI-Agent/
 │   ├── ai/             # AI模型相关代码
 │   ├── communication/  # 通信相关代码
 │   ├── config/         # 配置相关代码
+│   ├── core/           # 核心架构组件
+│   │   ├── function_calling_engine.py  # Function Calling引擎
+│   │   ├── mcp_tool_registry.py        # MCP工具注册表
+│   │   └── meta_router_v2.py           # 元认知路由器V2
 │   ├── database/       # 数据库集成
 │   ├── frontend/       # 前端界面
 │   ├── gateway/        # API网关和负载均衡
@@ -163,12 +197,20 @@ Home-AI-Agent/
 │   ├── security/       # 安全模块
 │   ├── skills/         # 原子化技能
 │   └── tools/          # 工具相关代码
+│       └── mcp_tools/  # MCP工具模块
+│           ├── device_control_tool.py  # 设备控制工具
+│           ├── web_search_tool.py      # 网络搜索工具
+│           ├── memory_tool.py          # 记忆管理工具
+│           ├── file_operations_tool.py # 文件操作工具
+│           ├── scheduler_tool.py       # 任务调度工具
+│           └── memo_tool.py            # 备忘录工具
 ├── config/             # 配置文件目录
 ├── data/               # 数据存储
 │   └── conversations/   # 对话存储
 │       ├── chats.json   # 对话注册表
 │       └── sessions/    # 会话文件
 ├── docs/               # 文档目录
+│   └── ARCHITECTURE_V2.md  # 新架构文档
 ├── examples/           # 示例代码目录
 ├── YUEYUE/             # 智能体人格定义
 ├── app.py              # 主应用入口
@@ -189,7 +231,7 @@ Home-AI-Agent/
 - 检查网络连接
 
 ### 3. 前端页面无法访问
-- 检查前端服务器是否启动
+- 检查后端服务是否启动
 - 检查浏览器缓存
 - 检查网络连接
 
