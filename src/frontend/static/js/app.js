@@ -141,7 +141,7 @@ function restoreDeviceUIState(devices) {
         // 根据设备类型恢复UI
         if (deviceType === 'lamp') {
             restoreLampUI(deviceId, state);
-        } else if (deviceType === 'ac') {
+        } else if (deviceType === 'air_conditioner') {
             restoreACUI(deviceId, state);
         } else if (deviceType === 'curtain') {
             restoreCurtainUI(deviceId, state);
@@ -288,7 +288,7 @@ async function syncDeviceStates() {
                     const device = deviceStates[deviceId];
                     if (device.device_type === 'lamp') {
                         restoreLampUI(deviceId, data.status);
-                    } else if (device.device_type === 'ac') {
+                    } else if (device.device_type === 'air_conditioner') {
                         restoreACUI(deviceId, data.status);
                     } else if (device.device_type === 'curtain') {
                         restoreCurtainUI(deviceId, data.status);
@@ -415,12 +415,18 @@ async function createTask() {
     if (!taskContent) return;
     
     try {
-        const response = await fetch('/api/reminder/create', {
+        // 使用现有的 scheduler 端点
+        const response = await fetch('/api/scheduler/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ title: taskContent })
+            body: JSON.stringify({ 
+                title: taskContent, 
+                content: taskContent, 
+                reminder_time: new Date().toISOString(),
+                repeat_type: 'once'
+            })
         });
         
         if (!response.ok) {
@@ -447,7 +453,8 @@ async function loadTasks() {
     if (!taskList) return;
     
     try {
-        const response = await fetch('/api/reminder/list/default_user');
+        // 使用现有的 scheduler 端点
+        const response = await fetch('/api/scheduler/list');
         
         if (!response.ok) {
             throw new Error('API调用失败');
@@ -456,7 +463,7 @@ async function loadTasks() {
         const data = await response.json();
         
         if (data.success) {
-            renderTasks(data.reminders);
+            renderTasks(data.tasks || []);
         }
     } catch (error) {
         console.error('加载任务失败:', error);
@@ -530,8 +537,6 @@ function bindTaskTabs() {
             // 加载对应标签的内容
             if (tab === 'scheduled') {
                 loadScheduleList();
-            } else if (tab === 'regular') {
-                loadTasks();
             }
         });
     });
@@ -545,7 +550,14 @@ async function loadMemoryFiles() {
         if (soulResponse.ok) {
             const soulData = await soulResponse.json();
             if (soulData.success && soulData.data) {
-                document.getElementById('soul-content').value = soulData.data;
+                const soulContent = document.getElementById('soul-content');
+                soulContent.value = soulData.data;
+                // 设置人格文件为只读
+                soulContent.readOnly = true;
+                soulContent.style.backgroundColor = '#f5f5f5';
+                // 禁用保存按钮
+                document.getElementById('save-soul-btn').disabled = true;
+                document.getElementById('save-soul-btn').style.opacity = '0.5';
             }
         }
         
@@ -564,30 +576,9 @@ async function loadMemoryFiles() {
 
 // 保存人格文件
 async function saveSoulFile() {
-    const content = document.getElementById('soul-content').value;
-    try {
-        const response = await fetch('/api/memory/soul', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ content: content })
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.success) {
-                alert('人格文件保存成功');
-            } else {
-                alert('保存失败: ' + (data.message || '未知错误'));
-            }
-        } else {
-            alert('保存失败: API调用失败');
-        }
-    } catch (error) {
-        console.error('保存人格文件失败:', error);
-        alert('保存失败: ' + error.message);
-    }
+    // 人格文件是只读的，不允许修改
+    alert('人格文件不可修改');
+    return;
 }
 
 // 保存记忆文件
@@ -1007,8 +998,7 @@ function init() {
     if (savedSessionId) {
         currentSessionId = savedSessionId;
         console.log('从本地存储加载会话ID:', currentSessionId);
-        // 加载对话历史
-        loadChatHistory(currentSessionId);
+        // 不直接加载对话历史，由 loadChats 函数处理
     } else {
         // 没有保存的会话ID，显示初始化界面
         console.log('没有保存的会话ID，显示初始化界面');
@@ -1113,8 +1103,8 @@ function init() {
     // 设备控制事件
     bindDeviceControls();
     
-    // 加载任务列表
-    loadTasks();
+    // 加载定时任务列表
+    loadScheduleList();
     
     // 绑定侧边栏导航事件
     bindSidebarNavigation();
@@ -1587,7 +1577,7 @@ function bindSidebarNavigation() {
                 const titles = {
                     'chat': '聊天',
                     'device': '设备控制',
-                    'task': '任务管理',
+                    'task': '定时任务',
                     'memory': '记忆管理',
                     'scheduler': '定时任务',
                     'distillation': '记忆蒸馏',
@@ -1606,7 +1596,7 @@ function bindSidebarNavigation() {
             } else if (section === 'scheduler') {
                 loadScheduleList();
             } else if (section === 'task') {
-                loadTasks();
+                loadScheduleList();
             } else if (section === 'chat') {
                 // 尝试从本地存储恢复会话ID
                 const savedSessionId = localStorage.getItem(`currentSessionId_${windowId}`);
@@ -1922,6 +1912,45 @@ async function checkMemoryConfirmations() {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM加载完成，开始初始化应用');
     init();
+    
+    // 初始化设备管理
+    initDeviceManagement();
+    
+    // 绑定侧边栏导航事件，在切换到设备页面时加载设备
+    const deviceNavItem = document.querySelector('.nav-item[data-section="device"]');
+    if (deviceNavItem) {
+        deviceNavItem.addEventListener('click', () => {
+            loadDevices();
+        });
+    }
+    
+    // 绑定滑块事件(防抖处理)
+    const lampBrightnessSlider = document.getElementById('lamp-brightness-slider');
+    if (lampBrightnessSlider) {
+        let timeout;
+        lampBrightnessSlider.addEventListener('change', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(setLampBrightness, 300);
+        });
+    }
+    
+    const acFanSlider = document.getElementById('ac-fan-slider');
+    if (acFanSlider) {
+        let timeout;
+        acFanSlider.addEventListener('change', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(setACFanSpeed, 300);
+        });
+    }
+    
+    const curtainSlider = document.getElementById('curtain-position-slider');
+    if (curtainSlider) {
+        let timeout;
+        curtainSlider.addEventListener('change', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => controlCurtain('set_position'), 300);
+        });
+    }
 });
 
 // 对话管理相关函数
@@ -2955,18 +2984,20 @@ function removeThinkingMessage(id) {
 let devicesData = [];           // 设备数据缓存
 let currentDeviceId = null;     // 当前操作的设备ID
 let deviceStatusInterval = null; // 状态轮询定时器
+let deviceStatusWebSocket = null; // WebSocket连接
+let isWebSocketConnected = false; // WebSocket连接状态
 
 // 设备类型配置
 const DEVICE_TYPES = {
     lamp: { label: '台灯', icon: '💡', color: '#FFB347' },
-    ac: { label: '空调', icon: '❄️', color: '#64B5F6' },
+    air_conditioner: { label: '空调', icon: '❄️', color: '#64B5F6' },
     curtain: { label: '窗帘', icon: '🪟', color: '#81C784' }
 };
 
 // 设备类型描述
 const DEVICE_TYPE_DESCRIPTIONS = {
     lamp: '智能台灯，支持亮度调节(0-100%)、色温切换(正常/护眼)、定时关机',
-    ac: '智能空调，支持温度调节(16-30°C)、模式切换(制冷/制热)、风速调节(1-5档)',
+    air_conditioner: '智能空调，支持温度调节(16-30°C)、模式切换(制冷/制热)、风速调节(1-5档)',
     curtain: '智能窗帘，支持位置调节(0-100%)、全开/全关/停止控制'
 };
 
@@ -2978,8 +3009,171 @@ function initDeviceManagement() {
     // 加载设备列表
     loadDevices();
     
-    // 启动状态轮询
-    startDeviceStatusPolling();
+    // 尝试连接WebSocket，失败则使用轮询
+    connectDeviceStatusWebSocket();
+}
+
+/**
+ * 连接设备状态WebSocket
+ * 如果WebSocket连接失败，自动回退到轮询
+ */
+function connectDeviceStatusWebSocket() {
+    try {
+        // 检查浏览器是否支持WebSocket
+        if (!window.WebSocket) {
+            console.log('浏览器不支持WebSocket，使用轮询');
+            startDeviceStatusPolling();
+            return;
+        }
+        
+        // 创建WebSocket连接
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/api/devices/status/stream`;
+        
+        deviceStatusWebSocket = new WebSocket(wsUrl);
+        
+        deviceStatusWebSocket.onopen = function() {
+            console.log('设备状态WebSocket已连接');
+            isWebSocketConnected = true;
+            
+            // 停止轮询，使用WebSocket
+            if (deviceStatusInterval) {
+                clearInterval(deviceStatusInterval);
+                deviceStatusInterval = null;
+            }
+            
+            // 发送认证消息（如果需要）
+            // deviceStatusWebSocket.send(JSON.stringify({ type: 'auth', token: getAuthToken() }));
+        };
+        
+        deviceStatusWebSocket.onmessage = function(event) {
+            try {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            } catch (error) {
+                console.error('解析WebSocket消息失败:', error);
+            }
+        };
+        
+        deviceStatusWebSocket.onerror = function(error) {
+            console.error('WebSocket错误:', error);
+            isWebSocketConnected = false;
+        };
+        
+        deviceStatusWebSocket.onclose = function() {
+            console.log('设备状态WebSocket已断开');
+            isWebSocketConnected = false;
+            
+            // 如果WebSocket断开，启动轮询作为后备
+            if (!deviceStatusInterval) {
+                startDeviceStatusPolling();
+            }
+            
+            // 尝试重新连接（指数退避）
+            setTimeout(() => {
+                if (!isWebSocketConnected) {
+                    connectDeviceStatusWebSocket();
+                }
+            }, 5000);
+        };
+        
+    } catch (error) {
+        console.error('连接WebSocket失败:', error);
+        startDeviceStatusPolling();
+    }
+}
+
+/**
+ * 处理WebSocket消息
+ * @param {Object} message - WebSocket消息
+ */
+function handleWebSocketMessage(message) {
+    switch (message.type) {
+        case 'status_update':
+            // 更新单个设备状态
+            updateDeviceStatus(message.device_id, message.status);
+            break;
+        case 'status_batch':
+            // 批量更新设备状态
+            updateDeviceStatuses(message.devices);
+            break;
+        case 'device_online':
+            // 设备上线
+            showToast(`设备 ${message.device_name} 已上线`, 'success');
+            refreshDeviceStatus();
+            break;
+        case 'device_offline':
+            // 设备离线
+            showToast(`设备 ${message.device_name} 已离线`, 'warning');
+            refreshDeviceStatus();
+            break;
+        case 'error':
+            console.error('WebSocket错误消息:', message.error);
+            break;
+        default:
+            console.log('未知WebSocket消息类型:', message.type);
+    }
+}
+
+/**
+ * 更新单个设备状态（不重新渲染整个列表）
+ * @param {string} deviceId - 设备ID
+ * @param {Object} status - 设备状态
+ */
+function updateDeviceStatus(deviceId, status) {
+    // 更新数据
+    const deviceIndex = devicesData.findIndex(d => d.device_id === deviceId);
+    if (deviceIndex !== -1) {
+        devicesData[deviceIndex] = { ...devicesData[deviceIndex], ...status };
+        
+        // 更新UI
+        const deviceCard = document.querySelector(`.device-card[data-device-id="${deviceId}"]`);
+        if (deviceCard) {
+            // 更新状态徽章
+            const newStatus = getDeviceStatus(devicesData[deviceIndex]);
+            const statusConfig = getStatusConfig(newStatus);
+            
+            const statusBadge = deviceCard.querySelector('.device-status-badge');
+            if (statusBadge) {
+                statusBadge.className = `device-status-badge ${newStatus}`;
+                statusBadge.innerHTML = `
+                    <span class="status-indicator" style="background-color: ${statusConfig.color}"></span>
+                    ${statusConfig.label}
+                `;
+            }
+            
+            // 更新卡片样式
+            deviceCard.className = `device-card status-${newStatus}`;
+            
+            // 更新状态详情
+            const statusDetails = deviceCard.querySelector('.device-status-details');
+            if (statusDetails) {
+                const details = getDeviceStatusDetails(devicesData[deviceIndex]);
+                statusDetails.innerHTML = details.map(detail => `
+                    <div class="status-detail-item">
+                        <span class="detail-label">${detail.label}:</span>
+                        <span class="detail-value">${detail.value}</span>
+                    </div>
+                `).join('');
+            }
+            
+            // 更新最后 seen 时间
+            const lastSeen = deviceCard.querySelector('.last-seen');
+            if (lastSeen && status.last_updated) {
+                lastSeen.textContent = formatLastSeen(status.last_updated);
+            }
+        }
+    }
+}
+
+/**
+ * 批量更新设备状态
+ * @param {Array} devices - 设备列表
+ */
+function updateDeviceStatuses(devices) {
+    devices.forEach(device => {
+        updateDeviceStatus(device.device_id, device);
+    });
 }
 
 /**
@@ -3023,13 +3217,25 @@ function renderDeviceList() {
     
     if (!deviceList) return;
     
+    // 更新仪表板统计
+    updateDeviceDashboard();
+    
+    // 获取过滤和排序后的设备列表
+    const filteredDevices = getFilteredAndSortedDevices();
+    
     // 清空列表
     deviceList.innerHTML = '';
     
     // 检查是否有设备
-    if (devicesData.length === 0) {
+    if (filteredDevices.length === 0) {
         deviceList.style.display = 'none';
-        if (emptyState) emptyState.style.display = 'flex';
+        if (emptyState) {
+            emptyState.style.display = 'flex';
+            const emptyText = emptyState.querySelector('.empty-text');
+            if (emptyText) {
+                emptyText.textContent = devicesData.length === 0 ? '暂无设备' : '没有符合条件的设备';
+            }
+        }
         return;
     }
     
@@ -3037,10 +3243,101 @@ function renderDeviceList() {
     if (emptyState) emptyState.style.display = 'none';
     
     // 渲染每个设备
-    devicesData.forEach(device => {
+    filteredDevices.forEach(device => {
         const deviceCard = createDeviceCard(device);
         deviceList.appendChild(deviceCard);
     });
+}
+
+/**
+ * 更新设备状态仪表板
+ */
+function updateDeviceDashboard() {
+    const totalEl = document.getElementById('stat-total');
+    const onlineEl = document.getElementById('stat-online');
+    const idleEl = document.getElementById('stat-idle');
+    const offlineEl = document.getElementById('stat-offline');
+    const connectionStatus = document.getElementById('connection-status');
+    
+    if (!totalEl) return;
+    
+    // 计算统计数据
+    const total = devicesData.length;
+    const online = devicesData.filter(d => getDeviceStatus(d) === 'online').length;
+    const idle = devicesData.filter(d => getDeviceStatus(d) === 'idle').length;
+    const offline = devicesData.filter(d => getDeviceStatus(d) === 'offline').length;
+    
+    // 更新显示
+    totalEl.textContent = total;
+    onlineEl.textContent = online;
+    idleEl.textContent = idle;
+    offlineEl.textContent = offline;
+    
+    // 更新连接状态
+    if (connectionStatus) {
+        if (isWebSocketConnected) {
+            connectionStatus.className = 'connection-status connected';
+            connectionStatus.querySelector('.status-text').textContent = '实时连接';
+        } else if (deviceStatusInterval) {
+            connectionStatus.className = 'connection-status';
+            connectionStatus.querySelector('.status-text').textContent = '轮询模式';
+        } else {
+            connectionStatus.className = 'connection-status disconnected';
+            connectionStatus.querySelector('.status-text').textContent = '已断开';
+        }
+    }
+}
+
+/**
+ * 获取过滤和排序后的设备列表
+ * @returns {Array} 过滤和排序后的设备列表
+ */
+function getFilteredAndSortedDevices() {
+    let result = [...devicesData];
+    
+    // 应用状态过滤
+    const statusFilter = document.getElementById('filter-status');
+    if (statusFilter && statusFilter.value !== 'all') {
+        result = result.filter(device => getDeviceStatus(device) === statusFilter.value);
+    }
+    
+    // 应用类型过滤
+    const typeFilter = document.getElementById('filter-type');
+    if (typeFilter && typeFilter.value !== 'all') {
+        result = result.filter(device => device.device_type === typeFilter.value);
+    }
+    
+    // 应用排序
+    const sortBy = document.getElementById('sort-by');
+    if (sortBy) {
+        switch (sortBy.value) {
+            case 'name-asc':
+                result.sort((a, b) => a.device_name.localeCompare(b.device_name, 'zh-CN'));
+                break;
+            case 'name-desc':
+                result.sort((a, b) => b.device_name.localeCompare(a.device_name, 'zh-CN'));
+                break;
+            case 'status':
+                const statusOrder = { online: 0, idle: 1, offline: 2, error: 3 };
+                result.sort((a, b) => statusOrder[getDeviceStatus(a)] - statusOrder[getDeviceStatus(b)]);
+                break;
+            case 'type':
+                result.sort((a, b) => a.device_type.localeCompare(b.device_type));
+                break;
+            case 'last-updated':
+                result.sort((a, b) => new Date(b.last_updated || 0) - new Date(a.last_updated || 0));
+                break;
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * 应用设备过滤和排序
+ */
+function applyDeviceFilters() {
+    renderDeviceList();
 }
 
 /**
@@ -3050,23 +3347,24 @@ function renderDeviceList() {
  * @returns {HTMLElement} 设备卡片元素
  */
 function createDeviceCard(device) {
-    const typeConfig = DEVICE_TYPES[device.type] || { label: '未知', icon: '❓', color: '#999' };
-    const isOnline = device.status === 'online';
-    const state = device.state || {};
+    const typeConfig = DEVICE_TYPES[device.device_type] || { label: '未知', icon: '❓', color: '#999' };
+    const state = device.current_state || {};
+    
+    // Determine device status with more granularity
+    const status = getDeviceStatus(device);
+    const statusConfig = getStatusConfig(status);
     
     const card = document.createElement('div');
-    card.className = `device-card ${isOnline ? 'online' : 'offline'}`;
-    card.dataset.deviceId = device.id;
+    card.className = `device-card status-${status}`;
+    card.dataset.deviceId = device.device_id;
+    card.dataset.deviceType = device.device_type;
+    card.dataset.deviceStatus = status;
     
-    // 根据设备类型显示不同的状态信息
-    let statusInfo = '';
-    if (device.type === 'lamp') {
-        statusInfo = state.power ? `亮度 ${state.brightness}%` : '已关闭';
-    } else if (device.type === 'ac') {
-        statusInfo = state.power ? `${state.temperature}°C ${state.mode === 'cool' ? '制冷' : '制热'}` : '已关闭';
-    } else if (device.type === 'curtain') {
-        statusInfo = `位置 ${state.position}%`;
-    }
+    // Get detailed status information based on device type
+    const statusDetails = getDeviceStatusDetails(device);
+    
+    // Format last seen time
+    const lastSeen = device.last_updated ? formatLastSeen(device.last_updated) : '未知';
     
     card.innerHTML = `
         <div class="device-card-header">
@@ -3074,30 +3372,153 @@ function createDeviceCard(device) {
                 ${typeConfig.icon}
             </div>
             <div class="device-info">
-                <div class="device-name">${escapeHtml(device.name)}</div>
+                <div class="device-name">${escapeHtml(device.device_name)}</div>
                 <div class="device-type">${typeConfig.label}</div>
             </div>
-            <div class="device-status-badge ${isOnline ? 'online' : 'offline'}">
-                ${isOnline ? '在线' : '离线'}
+            <div class="device-status-container">
+                <div class="device-status-badge ${status}" title="${statusConfig.description}">
+                    <span class="status-indicator" style="background-color: ${statusConfig.color}"></span>
+                    ${statusConfig.label}
+                </div>
+                <div class="last-seen">${lastSeen}</div>
             </div>
         </div>
         <div class="device-card-body">
-            <div class="device-status-info">${statusInfo}</div>
+            <div class="device-status-details">
+                ${statusDetails.map(detail => `
+                    <div class="status-detail-item">
+                        <span class="detail-label">${detail.label}:</span>
+                        <span class="detail-value">${detail.value}</span>
+                    </div>
+                `).join('')}
+            </div>
         </div>
         <div class="device-card-footer">
-            <button class="device-action-btn control-btn" onclick="openDeviceControlModal('${device.id}')">
+            <button class="device-action-btn control-btn" onclick="openDeviceControlModal('${device.device_id}')">
                 <span>⚙️</span> 控制
             </button>
-            <button class="device-action-btn edit-btn" onclick="showEditDeviceModal('${device.id}')">
+            <button class="device-action-btn edit-btn" onclick="showEditDeviceModal('${device.device_id}')">
                 <span>✏️</span> 编辑
             </button>
-            <button class="device-action-btn delete-btn" onclick="confirmDeleteDevice('${device.id}')">
+            <button class="device-action-btn delete-btn" onclick="confirmDeleteDevice('${device.device_id}')">
                 <span>🗑️</span> 删除
             </button>
         </div>
-    `;
+    `
     
     return card;
+}
+
+/**
+ * Get device status with enhanced granularity
+ * @param {Object} device - Device data
+ * @returns {string} Status: 'online', 'idle', 'offline', 'error'
+ */
+function getDeviceStatus(device) {
+    const baseStatus = device.status || 'offline';
+    const lastUpdated = device.last_updated ? new Date(device.last_updated) : null;
+    const state = device.current_state || {};
+    
+    if (baseStatus === 'offline') {
+        return 'offline';
+    }
+    
+    if (baseStatus === 'error') {
+        return 'error';
+    }
+    
+    // Check if device is idle (online but inactive for >5 minutes)
+    if (lastUpdated) {
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        if (lastUpdated < fiveMinutesAgo) {
+            return 'idle';
+        }
+    }
+    
+    return 'online';
+}
+
+/**
+ * Get status configuration (label, color, description)
+ * @param {string} status - Device status
+ * @returns {Object} Status configuration
+ */
+function getStatusConfig(status) {
+    const configs = {
+        online: { label: '在线', color: '#4CAF50', description: '设备正常运行' },
+        idle: { label: '空闲', color: '#FFC107', description: '设备在线但无活动' },
+        offline: { label: '离线', color: '#F44336', description: '设备已离线' },
+        error: { label: '错误', color: '#9C27B0', description: '设备发生错误' }
+    };
+    return configs[status] || configs.offline;
+}
+
+/**
+ * Get detailed status information based on device type
+ * @param {Object} device - Device data
+ * @returns {Array} Array of status detail objects
+ */
+function getDeviceStatusDetails(device) {
+    const state = device.current_state || {};
+    const details = [];
+    
+    switch (device.device_type) {
+        case 'lamp':
+            details.push(
+                { label: '电源', value: state.power ? '开启' : '关闭' },
+                { label: '亮度', value: state.power ? `${state.brightness || 0}%` : '-' },
+                { label: '色温', value: state.color_temperature === 'warm' ? '暖光' : 
+                                      state.color_temperature === 'cool' ? '冷光' : '正常' }
+            );
+            break;
+        case 'air_conditioner':
+            details.push(
+                { label: '电源', value: state.power ? '开启' : '关闭' },
+                { label: '温度', value: state.power ? `${state.temperature || 24}°C` : '-' },
+                { label: '模式', value: state.mode === 'cool' ? '制冷' : 
+                                      state.mode === 'heat' ? '制热' : 
+                                      state.mode === 'dry' ? '除湿' : '送风' },
+                { label: '风速', value: state.fan_speed ? `${state.fan_speed}档` : '自动' }
+            );
+            break;
+        case 'curtain':
+            details.push(
+                { label: '位置', value: `${state.position || 0}%` },
+                { label: '状态', value: state.position === 0 ? '已关闭' : 
+                                      state.position === 100 ? '已打开' : '部分打开' }
+            );
+            break;
+        default:
+            details.push({ label: '状态', value: '未知设备类型' });
+    }
+    
+    return details;
+}
+
+/**
+ * Format last seen time in human-readable format
+ * @param {string} timestamp - ISO timestamp
+ * @returns {string} Formatted time string
+ */
+function formatLastSeen(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) {
+        return '刚刚';
+    } else if (diffMins < 60) {
+        return `${diffMins}分钟前`;
+    } else if (diffHours < 24) {
+        return `${diffHours}小时前`;
+    } else if (diffDays < 7) {
+        return `${diffDays}天前`;
+    } else {
+        return date.toLocaleDateString('zh-CN');
+    }
 }
 
 /**
@@ -3127,16 +3548,16 @@ function showAddDeviceModal() {
  * @param {string} deviceId - 设备ID
  */
 function showEditDeviceModal(deviceId) {
-    const device = devicesData.find(d => d.id === deviceId);
+    const device = devicesData.find(d => d.device_id === deviceId);
     if (!device) {
         showToast('设备不存在', 'error');
         return;
     }
     
     // 填充表单
-    document.getElementById('device-id').value = device.id;
-    document.getElementById('device-name').value = device.name;
-    document.getElementById('device-type').value = device.type;
+    document.getElementById('device-id').value = device.device_id;
+    document.getElementById('device-name').value = device.device_name;
+    document.getElementById('device-type').value = device.device_type;
     document.getElementById('device-modal-title').textContent = '编辑设备';
     
     // 隐藏错误信息
@@ -3260,12 +3681,12 @@ async function saveDevice() {
  * @param {string} deviceId - 设备ID
  */
 function confirmDeleteDevice(deviceId) {
-    const device = devicesData.find(d => d.id === deviceId);
+    const device = devicesData.find(d => d.device_id === deviceId);
     if (!device) return;
     
     showConfirmModal(
         '删除设备',
-        `确定要删除设备 "${device.name}" 吗？此操作无法撤销。`,
+        `确定要删除设备 "${device.device_name}" 吗？此操作无法撤销。`,
         () => deleteDevice(deviceId)
     );
 }
@@ -3303,7 +3724,7 @@ async function deleteDevice(deviceId) {
  * @param {string} deviceId - 设备ID
  */
 function openDeviceControlModal(deviceId) {
-    const device = devicesData.find(d => d.id === deviceId);
+    const device = devicesData.find(d => d.device_id === deviceId);
     if (!device) {
         showToast('设备不存在', 'error');
         return;
@@ -3312,7 +3733,7 @@ function openDeviceControlModal(deviceId) {
     currentDeviceId = deviceId;
     
     // 设置模态窗口标题
-    document.getElementById('control-modal-title').textContent = device.name;
+    document.getElementById('control-modal-title').textContent = device.device_name;
     document.getElementById('control-device-id').value = deviceId;
     
     // 更新状态显示
@@ -3323,13 +3744,13 @@ function openDeviceControlModal(deviceId) {
     document.getElementById('ac-control-panel').style.display = 'none';
     document.getElementById('curtain-control-panel').style.display = 'none';
     
-    if (device.type === 'lamp') {
+    if (device.device_type === 'lamp') {
         document.getElementById('lamp-control-panel').style.display = 'block';
         initLampControls(device);
-    } else if (device.type === 'ac') {
+    } else if (device.device_type === 'air_conditioner') {
         document.getElementById('ac-control-panel').style.display = 'block';
         initACControls(device);
-    } else if (device.type === 'curtain') {
+    } else if (device.device_type === 'curtain') {
         document.getElementById('curtain-control-panel').style.display = 'block';
         initCurtainControls(device);
     }
@@ -3378,7 +3799,7 @@ function updateDeviceStatusBar(device) {
  * @param {Object} device - 设备数据
  */
 function initLampControls(device) {
-    const state = device.state || {};
+    const state = device.current_state || {};
     
     // 设置电源按钮状态
     updateLampPowerButton(state.power);
@@ -3418,14 +3839,14 @@ function updateLampPowerButton(power) {
 async function toggleLampPower() {
     if (!currentDeviceId) return;
     
-    const device = devicesData.find(d => d.id === currentDeviceId);
+    const device = devicesData.find(d => d.device_id === currentDeviceId);
     if (!device) return;
     
-    const command = device.state.power ? 'power_off' : 'power_on';
+    const command = device.current_state.power ? 'power_off' : 'power_on';
     
     const result = await sendDeviceCommand(currentDeviceId, command);
     if (result.success) {
-        device.state.power = !device.state.power;
+        device.current_state.power = !device.current_state.power;
         updateLampPowerButton(device.state.power);
         renderDeviceList(); // 更新列表显示
     }
@@ -3450,9 +3871,9 @@ async function setLampBrightness() {
     
     const result = await sendDeviceCommand(currentDeviceId, 'set_brightness', { brightness: value });
     if (result.success) {
-        const device = devicesData.find(d => d.id === currentDeviceId);
+        const device = devicesData.find(d => d.device_id === currentDeviceId);
         if (device) {
-            device.state.brightness = value;
+            device.current_state.brightness = value;
             renderDeviceList();
         }
     }
@@ -3482,9 +3903,9 @@ async function setLampColorTemp(temp) {
     const result = await sendDeviceCommand(currentDeviceId, 'set_color_temp', { color_temp: temp });
     if (result.success) {
         updateLampColorTempButtons(temp);
-        const device = devicesData.find(d => d.id === currentDeviceId);
+        const device = devicesData.find(d => d.device_id === currentDeviceId);
         if (device) {
-            device.state.color_temp = temp;
+            device.current_state.color_temp = temp;
         }
     }
 }
@@ -3501,9 +3922,9 @@ async function setLampTimer(minutes) {
     
     const result = await sendDeviceCommand(currentDeviceId, 'set_timer', { minutes: value });
     if (result.success) {
-        const device = devicesData.find(d => d.id === currentDeviceId);
+        const device = devicesData.find(d => d.device_id === currentDeviceId);
         if (device) {
-            device.state.timer_off = value;
+            device.current_state.timer_off = value;
         }
         showToast(minutes ? `已设置${minutes}分钟后自动关闭` : '已取消定时关闭', 'success');
     }
@@ -3517,7 +3938,7 @@ async function setLampTimer(minutes) {
  * @param {Object} device - 设备数据
  */
 function initACControls(device) {
-    const state = device.state || {};
+    const state = device.current_state || {};
     
     // 设置电源按钮
     updateACPowerButton(state.power);
@@ -3557,14 +3978,14 @@ function updateACPowerButton(power) {
 async function toggleACPower() {
     if (!currentDeviceId) return;
     
-    const device = devicesData.find(d => d.id === currentDeviceId);
+    const device = devicesData.find(d => d.device_id === currentDeviceId);
     if (!device) return;
     
-    const command = device.state.power ? 'power_off' : 'power_on';
+    const command = device.current_state.power ? 'power_off' : 'power_on';
     
     const result = await sendDeviceCommand(currentDeviceId, command);
     if (result.success) {
-        device.state.power = !device.state.power;
+        device.current_state.power = !device.current_state.power;
         updateACPowerButton(device.state.power);
         renderDeviceList();
     }
@@ -3578,16 +3999,16 @@ async function toggleACPower() {
 async function adjustACTemp(delta) {
     if (!currentDeviceId) return;
     
-    const device = devicesData.find(d => d.id === currentDeviceId);
+    const device = devicesData.find(d => d.device_id === currentDeviceId);
     if (!device) return;
     
-    const newTemp = (device.state.temperature || 26) + delta;
+    const newTemp = (device.current_state.temperature || 26) + delta;
     
     if (newTemp < 16 || newTemp > 30) return;
     
     const result = await sendDeviceCommand(currentDeviceId, 'set_temperature', { temperature: newTemp });
     if (result.success) {
-        device.state.temperature = newTemp;
+        device.current_state.temperature = newTemp;
         document.getElementById('ac-temp-display').textContent = `${newTemp}°C`;
         renderDeviceList();
     }
@@ -3617,9 +4038,9 @@ async function setACMode(mode) {
     const result = await sendDeviceCommand(currentDeviceId, 'set_mode', { mode });
     if (result.success) {
         updateACModeButtons(mode);
-        const device = devicesData.find(d => d.id === currentDeviceId);
+        const device = devicesData.find(d => d.device_id === currentDeviceId);
         if (device) {
-            device.state.mode = mode;
+            device.current_state.mode = mode;
             renderDeviceList();
         }
     }
@@ -3644,9 +4065,9 @@ async function setACFanSpeed() {
     
     const result = await sendDeviceCommand(currentDeviceId, 'set_fan_speed', { fan_speed: value });
     if (result.success) {
-        const device = devicesData.find(d => d.id === currentDeviceId);
+        const device = devicesData.find(d => d.device_id === currentDeviceId);
         if (device) {
-            device.state.fan_speed = value;
+            device.current_state.fan_speed = value;
             renderDeviceList();
         }
     }
@@ -3660,7 +4081,7 @@ async function setACFanSpeed() {
  * @param {Object} device - 设备数据
  */
 function initCurtainControls(device) {
-    const state = device.state || {};
+    const state = device.current_state || {};
     
     // 设置位置显示
     const position = state.position || 0;
@@ -3693,20 +4114,20 @@ async function controlCurtain(command) {
     
     const result = await sendDeviceCommand(currentDeviceId, command, params);
     if (result.success) {
-        const device = devicesData.find(d => d.id === currentDeviceId);
+        const device = devicesData.find(d => d.device_id === currentDeviceId);
         if (device) {
             if (command === 'open') {
-                device.state.position = 100;
+                device.current_state.position = 100;
             } else if (command === 'close') {
-                device.state.position = 0;
+                device.current_state.position = 0;
             } else if (command === 'set_position') {
-                device.state.position = params.position;
+                device.current_state.position = params.position;
             }
             
             // 更新显示
             if (command !== 'stop') {
-                document.getElementById('curtain-position-value').textContent = `${device.state.position}%`;
-                document.getElementById('curtain-position-slider').value = device.state.position;
+                document.getElementById('curtain-position-value').textContent = `${device.current_state.position}%`;
+                document.getElementById('curtain-position-slider').value = device.current_state.position;
                 renderDeviceList();
             }
         }
@@ -3870,47 +4291,7 @@ function escapeHtml(text) {
 
 // ==================== 事件绑定 ====================
 
-// 页面加载完成后初始化设备管理
-document.addEventListener('DOMContentLoaded', function() {
-    // 绑定侧边栏导航事件，在切换到设备页面时加载设备
-    const deviceNavItem = document.querySelector('.nav-item[data-section="device"]');
-    if (deviceNavItem) {
-        deviceNavItem.addEventListener('click', () => {
-            loadDevices();
-        });
-    }
-    
-    // 初始化设备管理
-    initDeviceManagement();
-    
-    // 绑定滑块事件(防抖处理)
-    const lampBrightnessSlider = document.getElementById('lamp-brightness-slider');
-    if (lampBrightnessSlider) {
-        let timeout;
-        lampBrightnessSlider.addEventListener('change', () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(setLampBrightness, 300);
-        });
-    }
-    
-    const acFanSlider = document.getElementById('ac-fan-slider');
-    if (acFanSlider) {
-        let timeout;
-        acFanSlider.addEventListener('change', () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(setACFanSpeed, 300);
-        });
-    }
-    
-    const curtainSlider = document.getElementById('curtain-position-slider');
-    if (curtainSlider) {
-        let timeout;
-        curtainSlider.addEventListener('change', () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => controlCurtain('set_position'), 300);
-        });
-    }
-});
+
 
 // 页面卸载时清理定时器
 window.addEventListener('beforeunload', () => {

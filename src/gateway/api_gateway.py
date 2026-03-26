@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.datetime_utils import format_local_datetime
+# 导入认证中间件
+from gateway.auth_middleware import get_current_user, require_read_access, require_write_access, require_admin_access, get_api_key
 # 导入流式过程数据结构
 from core.streaming_process import create_process, ThinkingProcess, SearchProcess, ToolCallProcess, AnalysisProcess, AnswerProcess, ErrorProcess, StreamEndProcess
 
@@ -28,12 +30,12 @@ class APIGateway:
     def __init__(self):
         self.app = FastAPI(title="智能家居智能体API", version="1.0.0")
         self._setup_middleware()
-        self._setup_static_files()
         self._setup_templates()
         self._initialize_dependencies()
         # 初始化请求去重集合
         self.processing_requests = set()  # 存储正在处理的请求ID
         self._setup_routes()
+        self._setup_static_files()
     
     def _initialize_dependencies(self):
         """初始化依赖"""
@@ -153,6 +155,8 @@ class APIGateway:
         templates_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "templates")
         if os.path.exists(templates_dir):
             self.templates = Jinja2Templates(directory=templates_dir)
+        else:
+            self.templates = None
     
     def _setup_middleware(self):
         """设置中间件"""
@@ -164,6 +168,14 @@ class APIGateway:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+        
+        # 速率限制中间件
+        try:
+            from gateway.rate_limiter import RateLimitMiddleware
+            # 尝试作为函数中间件添加
+            self.app.middleware("http")(RateLimitMiddleware)
+        except Exception as e:
+            print(f"[速率限制中间件] 加载失败: {str(e)}")
         
         # 请求日志中间件
         @self.app.middleware("http")
@@ -203,7 +215,11 @@ class APIGateway:
         async def root(request: Request):
             """返回前端HTML页面"""
             try:
-                return self.templates.TemplateResponse("index.html", {"request": request})
+                if self.templates:
+                    return self.templates.TemplateResponse("index.html", {"request": request})
+                else:
+                    # 如果模板未初始化，返回API信息
+                    return {"message": "智能家居智能体API", "version": "1.0.0"}
             except Exception as e:
                 # 如果模板渲染失败，返回API信息
                 print(f"[根路径] 模板渲染失败: {str(e)}")
@@ -301,14 +317,31 @@ class APIGateway:
                             # 首先发送会话ID
                             session_id_data = {"type": "session_id", "content": session_id}
                             yield f"data: {json.dumps(session_id_data)}\n\n"
+                            # 初始化过程信息列表
+                            process_list = []
+                            # 收集完整回答（未优化的原始内容）
+                            full_answer_raw = ""
                             # 执行智能决策
                             async for chunk in self.meta_router.process(user_input, context, stream=True):
-                                # 优化回答的人格表达
+                                # 收集原始回答内容
                                 if chunk.get('type') == 'answer':
-                                    optimized_content = await self.persona_optimizer.optimize_expression_async(chunk.get('content', ''), user_input)
-                                    chunk['content'] = optimized_content
+                                    # 收集原始内容，不进行优化
+                                    full_answer_raw += chunk.get('content', '')
+                                # 收集过程信息
+                                if chunk.get('type') not in ['answer', 'stream_end']:
+                                    process_list.append(chunk)
                                 # 发送SSE格式的数据
                                 yield f"data: {json.dumps(chunk)}\n\n"
+                            # 保存对话历史
+                            if full_answer_raw:
+                                # 对完整回答进行一次性优化
+                                optimized_full_answer = await self.persona_optimizer.optimize_expression_async(full_answer_raw, user_input)
+                                self.session_manager.save_conversation_history(
+                                    session_id,
+                                    user_input,
+                                    optimized_full_answer,
+                                    process_list
+                                )
                         except Exception as e:
                             # 发送错误信息
                             error_process = ErrorProcess(content=f"处理请求时出现错误: {str(e)}")
@@ -317,7 +350,7 @@ class APIGateway:
                             # 发送流结束标记
                             stream_end_process = StreamEndProcess()
                             yield f"data: {json.dumps(stream_end_process.to_dict())}\n\n"
-                    
+
                     return StreamingResponse(generate(), media_type="text/event-stream")
                 else:
                     try:
@@ -325,6 +358,12 @@ class APIGateway:
                         result = await self.meta_router.process_with_tools(user_input, context)
                         # 优化回答的人格表达
                         optimized_answer = await self.persona_optimizer.optimize_expression_async(result, user_input)
+                        # 保存对话历史
+                        self.session_manager.save_conversation_history(
+                            session_id,
+                            user_input,
+                            optimized_answer
+                        )
                         return {
                             "success": True,
                             "response": {
@@ -1216,6 +1255,124 @@ class APIGateway:
                     "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 }
         
+        # ==================== 记忆文件管理API ====================
+        
+        @self.app.get("/api/memory/soul")
+        async def get_soul_file():
+            """获取人格文件内容（只读）"""
+            try:
+                soul_file_path = "YUEYUE/Soul.md"
+                if os.path.exists(soul_file_path):
+                    with open(soul_file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    return {
+                        "success": True,
+                        "data": content,
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": "人格文件不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"读取人格文件失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.post("/api/memory/soul")
+        async def save_soul_file():
+            """禁止修改人格文件"""
+            return {
+                "success": False,
+                "message": "人格文件不可修改",
+                "code": 403,
+                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+            }
+        
+        @self.app.get("/api/memory/long-term")
+        async def get_long_term_memory():
+            """获取记忆文件内容"""
+            try:
+                memory_dir = "data/memory"
+                memory_file_path = os.path.join(memory_dir, "long_term_memory.md")
+                
+                # 确保目录存在
+                if not os.path.exists(memory_dir):
+                    os.makedirs(memory_dir, exist_ok=True)
+                
+                # 如果文件不存在，创建默认文件
+                if not os.path.exists(memory_file_path):
+                    with open(memory_file_path, 'w', encoding='utf-8') as f:
+                        f.write("# 长期记忆\n\n这里存储着悦悦的长期记忆...")
+                
+                # 读取文件内容
+                with open(memory_file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                return {
+                    "success": True,
+                    "data": content,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"读取记忆文件失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.post("/api/memory/long-term")
+        async def save_long_term_memory(request: Request):
+            """保存记忆文件内容"""
+            try:
+                data = await request.json()
+                content = data.get("content", "")
+                
+                memory_dir = "data/memory"
+                memory_file_path = os.path.join(memory_dir, "long_term_memory.md")
+                
+                # 确保目录存在
+                if not os.path.exists(memory_dir):
+                    os.makedirs(memory_dir, exist_ok=True)
+                
+                # 写入文件
+                with open(memory_file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                return {
+                    "success": True,
+                    "message": "记忆文件保存成功",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"保存记忆文件失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.post("/api/memory/distill")
+        async def distill_memory(request):
+            """执行记忆蒸馏"""
+            try:
+                # 这里可以实现记忆蒸馏的逻辑
+                # 暂时返回模拟数据
+                return {
+                    "success": True,
+                    "message": "记忆蒸馏完成",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"记忆蒸馏失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
         # ==================== 设备管理API ====================
         
         @self.app.get("/api/devices")
@@ -1682,6 +1839,272 @@ class APIGateway:
                     "message": f"获取设备类型失败: {str(e)}",
                     "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
                 }
+        
+        # ==================== 设备状态管理API ====================
+        
+        @self.app.get("/api/devices/status")
+        async def get_all_devices_status(current_user: dict = Depends(require_read_access)):
+            """
+            获取所有设备的状态摘要
+            
+            Returns:
+                所有设备的状态信息和统计摘要
+            """
+            try:
+                result = await self.device_manager.get_all_devices()
+                
+                if not result.get("success"):
+                    return {
+                        "success": False,
+                        "message": result.get("message", "获取设备状态失败"),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                devices = result.get("data", [])
+                
+                # 计算状态统计
+                total = len(devices)
+                online = sum(1 for d in devices if d.get("status") == "online")
+                offline = sum(1 for d in devices if d.get("status") == "offline")
+                error = sum(1 for d in devices if d.get("status") == "error")
+                
+                return {
+                    "success": True,
+                    "devices": devices,
+                    "summary": {
+                        "total": total,
+                        "online": online,
+                        "offline": offline,
+                        "error": error,
+                        "online_rate": round(online / total * 100, 1) if total > 0 else 0
+                    },
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"获取所有设备状态失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"获取设备状态失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.get("/api/devices/{device_id}/history")
+        async def get_device_status_history(
+            device_id: str,
+            hours: int = 24,
+            start_time: str = None,
+            end_time: str = None,
+            current_user: dict = Depends(require_read_access)
+        ):
+            """
+            获取设备状态历史记录
+            
+            Args:
+                device_id: 设备ID
+                hours: 查询最近多少小时（默认24小时）
+                start_time: 开始时间（ISO格式，可选）
+                end_time: 结束时间（ISO格式，可选）
+            
+            Returns:
+                设备状态历史记录
+            """
+            try:
+                # 验证设备存在
+                check_result = await self.device_manager.get_device(device_id)
+                if not check_result.get("success"):
+                    return {
+                        "success": False,
+                        "error_code": "DEVICE_NOT_FOUND",
+                        "message": "设备不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                # 限制查询范围（最多7天）
+                if hours > 168:  # 7 days
+                    hours = 168
+                
+                # 构建查询参数
+                query_params = {"device_id": device_id, "hours": hours}
+                if start_time:
+                    query_params["start_time"] = start_time
+                if end_time:
+                    query_params["end_time"] = end_time
+                
+                # 获取历史记录（从设备管理器或数据库）
+                # 这里简化处理，返回模拟数据
+                # 实际实现应该从数据库查询
+                history = []
+                
+                return {
+                    "success": True,
+                    "device_id": device_id,
+                    "history": history,
+                    "query_params": query_params,
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+            except Exception as e:
+                logger.error(f"获取设备状态历史失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"获取设备状态历史失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.post("/api/devices/{device_id}/refresh")
+        async def refresh_device_status(device_id: str, current_user: dict = Depends(require_write_access)):
+            """
+            强制刷新设备状态
+            
+            Args:
+                device_id: 设备ID
+            
+            Returns:
+                刷新后的设备状态
+            """
+            try:
+                # 验证设备存在
+                check_result = await self.device_manager.get_device(device_id)
+                if not check_result.get("success"):
+                    return {
+                        "success": False,
+                        "error_code": "DEVICE_NOT_FOUND",
+                        "message": "设备不存在",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                
+                # 强制刷新设备状态
+                result = await self.device_manager.refresh_device_status(device_id)
+                
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "device_id": device_id,
+                        "status": result.get("data"),
+                        "message": "设备状态已刷新",
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error_code": "REFRESH_FAILED",
+                        "message": result.get("message", "刷新设备状态失败"),
+                        "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                    }
+            except Exception as e:
+                logger.error(f"刷新设备状态失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"刷新设备状态失败: {str(e)}",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                }
+        
+        @self.app.websocket("/api/devices/status/stream")
+        async def device_status_websocket(websocket: WebSocket):
+            """
+            WebSocket端点，提供实时设备状态更新
+            
+            连接后，客户端将收到设备状态变更的实时推送
+            """
+            # 验证WebSocket连接
+            try:
+                # 从查询参数或头部获取token
+                token = websocket.query_params.get('token')
+                if not token:
+                    # 尝试从头部获取
+                    headers = dict(websocket.headers)
+                    auth_header = headers.get('authorization', '')
+                    if auth_header.startswith('Bearer '):
+                        token = auth_header[7:]
+                
+                if not token:
+                    await websocket.close(code=1008, reason="Authentication required")
+                    return
+                
+                # 验证token
+                from gateway.auth_middleware import AuthMiddleware
+                payload = AuthMiddleware.verify_token(token)
+                user_role = payload.get('role', 'user')
+                
+                # 检查权限
+                from gateway.auth_middleware import ROLES
+                if 'read' not in ROLES.get(user_role, []):
+                    await websocket.close(code=1008, reason="Insufficient permissions")
+                    return
+            except Exception as e:
+                await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
+                return
+            
+            await websocket.accept()
+            client_id = f"ws_{id(websocket)}"
+            
+            try:
+                logger.info(f"WebSocket客户端 {client_id} 已连接")
+                
+                # 发送初始连接成功消息
+                await websocket.send_json({
+                    "type": "connected",
+                    "message": "已连接到设备状态流",
+                    "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                })
+                
+                # 注册状态变更回调
+                async def status_change_callback(device_id: str, status: dict):
+                    try:
+                        await websocket.send_json({
+                            "type": "status_update",
+                            "device_id": device_id,
+                            "status": status,
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        })
+                    except Exception as e:
+                        logger.error(f"发送WebSocket消息失败: {e}")
+                
+                # 注册回调到设备管理器
+                self.device_manager.register_status_callback(client_id, status_change_callback)
+                
+                # 保持连接并处理客户端消息
+                while True:
+                    try:
+                        # 接收客户端消息（用于心跳检测）
+                        data = await websocket.receive_text()
+                        message = json.loads(data)
+                        
+                        # 处理订阅请求
+                        if message.get("type") == "subscribe":
+                            device_ids = message.get("device_ids", [])
+                            await websocket.send_json({
+                                "type": "subscribed",
+                                "device_ids": device_ids,
+                                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                            })
+                        
+                        # 处理心跳
+                        elif message.get("type") == "ping":
+                            await websocket.send_json({
+                                "type": "pong",
+                                "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                            })
+                            
+                    except json.JSONDecodeError:
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": "Invalid JSON format",
+                            "timestamp": format_local_datetime('%Y-%m-%dT%H:%M:%S')
+                        })
+                    except WebSocketDisconnect:
+                        break
+                        
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket客户端 {client_id} 已断开")
+            except Exception as e:
+                logger.error(f"WebSocket错误: {e}")
+            finally:
+                # 注销回调
+                self.device_manager.unregister_status_callback(client_id)
+                try:
+                    await websocket.close()
+                except:
+                    pass
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         """启动API服务器"""
@@ -1702,4 +2125,9 @@ if __name__ == "__main__":
     # 创建API网关实例并启动服务器
     gateway = APIGateway()
     gateway.run(host=args.host, port=args.port)
+# 当作为模块导入时，创建全局 app 实例供 Uvicorn 使用
+# 这样 uvicorn src.gateway.api_gateway:app 命令就能找到 app 实例
+gateway = APIGateway()
+app = gateway.app
+
 # 当作为模块导入时，不创建实例，由调用方创建

@@ -33,7 +33,7 @@
                     </li>
                     <li class="nav-item" data-section="task">
                         <span class="nav-icon">📋</span>
-                        <span class="nav-text">任务管理</span>
+                        <span class="nav-text">定时任务</span>
                         <span class="notification-badge" id="task-badge">0</span>
                     </li>
                     <li class="nav-item" data-section="memory">
@@ -115,6 +115,69 @@
                                 <span class="btn-text">添加设备</span>
                             </button>
                         </div>
+                        
+                        <!-- 设备状态仪表板 -->
+                        <div class="device-status-dashboard" id="device-status-dashboard">
+                            <div class="dashboard-stats">
+                                <div class="stat-card total">
+                                    <div class="stat-value" id="stat-total">0</div>
+                                    <div class="stat-label">总设备</div>
+                                </div>
+                                <div class="stat-card online">
+                                    <div class="stat-value" id="stat-online">0</div>
+                                    <div class="stat-label">在线</div>
+                                </div>
+                                <div class="stat-card idle">
+                                    <div class="stat-value" id="stat-idle">0</div>
+                                    <div class="stat-label">空闲</div>
+                                </div>
+                                <div class="stat-card offline">
+                                    <div class="stat-value" id="stat-offline">0</div>
+                                    <div class="stat-label">离线</div>
+                                </div>
+                            </div>
+                            <div class="connection-status" id="connection-status">
+                                <span class="status-indicator"></span>
+                                <span class="status-text">连接中...</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 设备筛选和排序 -->
+                        <div class="device-filters" id="device-filters">
+                            <div class="filter-group">
+                                <label>状态筛选:</label>
+                                <select id="filter-status" onchange="applyDeviceFilters()">
+                                    <option value="all">全部</option>
+                                    <option value="online">在线</option>
+                                    <option value="idle">空闲</option>
+                                    <option value="offline">离线</option>
+                                    <option value="error">错误</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>类型筛选:</label>
+                                <select id="filter-type" onchange="applyDeviceFilters()">
+                                    <option value="all">全部</option>
+                                    <option value="lamp">台灯</option>
+                                    <option value="air_conditioner">空调</option>
+                                    <option value="curtain">窗帘</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>排序方式:</label>
+                                <select id="sort-by" onchange="applyDeviceFilters()">
+                                    <option value="name-asc">名称 (A-Z)</option>
+                                    <option value="name-desc">名称 (Z-A)</option>
+                                    <option value="status">状态</option>
+                                    <option value="type">类型</option>
+                                    <option value="last-updated">最后更新</option>
+                                </select>
+                            </div>
+                            <button class="refresh-btn" onclick="refreshDeviceStatus()" title="刷新状态">
+                                <span>🔄</span>
+                            </button>
+                        </div>
+                        
                         <div class="device-list" id="device-list">
                             <!-- 设备列表将动态生成 -->
                         </div>
@@ -126,25 +189,15 @@
                     </div>
                 </section>
                 
-                <!-- 任务管理区域 -->
+                <!-- 定时任务区域 -->
                 <section id="task-section" class="content-section">
                     <div class="task-panel" id="task-panel">
-                        <h3>任务管理</h3>
+                        <h3>定时任务</h3>
                         <div class="task-tabs">
-                            <button class="tab-btn active" data-tab="regular">普通任务</button>
-                            <button class="tab-btn" data-tab="scheduled">定时任务</button>
+                            <button class="tab-btn active" data-tab="scheduled">定时任务</button>
                         </div>
                         <div class="tab-content">
-                            <div id="regular-tab" class="tab-pane active">
-                                <div class="task-controls">
-                                    <input type="text" id="task-input" placeholder="输入任务内容，如：明天早上8点提醒我开会" />
-                                    <button class="task-btn" id="create-task-btn">创建任务</button>
-                                </div>
-                                <div class="task-list" id="task-list">
-                                    <!-- 任务列表将动态生成 -->
-                                </div>
-                            </div>
-                            <div id="scheduled-tab" class="tab-pane">
+                            <div id="scheduled-tab" class="tab-pane active">
                                 <div class="scheduler-tabs">
                                     <button class="scheduler-tab-btn active" data-scheduler-tab="regular">普通定时任务</button>
                                     <button class="scheduler-tab-btn" data-scheduler-tab="batch_inference">批量推理任务</button>
@@ -360,7 +413,7 @@
                     <select id="device-type" onchange="onDeviceTypeChange()">
                         <option value="">请选择设备类型</option>
                         <option value="lamp">💡 台灯</option>
-                        <option value="ac">❄️ 空调</option>
+                        <option value="air_conditioner">❄️ 空调</option>
                         <option value="curtain">🪟 窗帘</option>
                     </select>
                     <span class="error-msg" id="device-type-error"></span>

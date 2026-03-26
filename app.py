@@ -76,6 +76,12 @@ if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
+    # 启动通知服务
+    from src.core.notification_service import start_notification_service
+    import asyncio
+    asyncio.run(start_notification_service())
+    print("通知服务已启动")
+    
     # 使用uvicorn启动FastAPI应用
     import uvicorn
     uvicorn.run("app:app", host="localhost", port=port, reload=False)

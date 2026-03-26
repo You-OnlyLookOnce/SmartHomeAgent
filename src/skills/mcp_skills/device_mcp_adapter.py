@@ -16,6 +16,7 @@ from datetime import datetime
 from enum import Enum
 
 from src.core.unified_mcp_protocol import MCPBase, UnifiedMCPProtocol
+from src.core.notification_service import notification_service
 from src.skills.device_skills.lamp_api import LampAPI, LampState
 from src.skills.device_skills.ac_api import AirConditionerAPI, ACState
 from src.skills.device_skills.curtain_api import CurtainAPI, CurtainState
@@ -103,6 +104,10 @@ class DeviceMCPAdapter(MCPBase):
         self._state_change_callbacks: List[Callable[[str, Dict[str, Any]], None]] = []
         # 锁用于线程安全
         self._lock = asyncio.Lock()
+        # 状态缓存 {device_id: {state, timestamp}}
+        self._status_cache: Dict[str, Dict[str, Any]] = {}
+        # 订阅管理 {device_id: [subscriber_callback]}
+        self._subscriptions: Dict[str, List[Callable[[str, Dict[str, Any]], None]]] = {}
         logger.info("设备MCP适配器初始化完成")
 
     async def register_device(self, device_type: str, device_id: str, device_name: str) -> Dict[str, Any]:
@@ -327,17 +332,29 @@ class DeviceMCPAdapter(MCPBase):
                 "data": None
             }
 
-    async def get_device_status(self, device_id: str) -> Dict[str, Any]:
+    async def get_device_status(self, device_id: str, use_cache: bool = True) -> Dict[str, Any]:
         """
         获取设备状态
 
         Args:
             device_id: 设备唯一标识
+            use_cache: 是否使用缓存
 
         Returns:
             设备状态字典
         """
-        return await self.execute_command(device_id, "get_status")
+        if use_cache:
+            # 尝试从缓存获取
+            cached_result = await self.get_cached_status(device_id)
+            if cached_result.get("success"):
+                return cached_result
+        
+        # 缓存不存在或禁用缓存，获取最新状态
+        result = await self.execute_command(device_id, "get_status")
+        if result.get("success") and result.get("data"):
+            # 更新缓存
+            await self._update_status_cache(device_id, result["data"])
+        return result
 
     async def sync_device_state(self, device_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -360,6 +377,18 @@ class DeviceMCPAdapter(MCPBase):
             device_id: 设备唯一标识
             state: 新状态
         """
+        # 获取设备模型
+        device_model = self._device_models.get(device_id)
+        if not device_model:
+            return
+
+        # 获取之前的状态
+        previous_state = device_model.current_state.copy()
+
+        # 更新状态缓存
+        await self._update_status_cache(device_id, state)
+
+        # 通知所有状态变更回调
         for callback in self._state_change_callbacks:
             try:
                 if asyncio.iscoroutinefunction(callback):
@@ -368,6 +397,31 @@ class DeviceMCPAdapter(MCPBase):
                     callback(device_id, state)
             except Exception as e:
                 logger.error(f"状态变更回调执行失败: {str(e)}")
+
+        # 通知设备订阅者
+        if device_id in self._subscriptions:
+            for subscriber_callback in self._subscriptions[device_id]:
+                try:
+                    if asyncio.iscoroutinefunction(subscriber_callback):
+                        await subscriber_callback(device_id, state)
+                    else:
+                        subscriber_callback(device_id, state)
+                except Exception as e:
+                    logger.error(f"设备订阅回调执行失败: {str(e)}")
+
+        # 发送设备状态变更通知给智能体
+        try:
+            await notification_service.create_device_status_notification(
+                device_id=device_id,
+                device_name=device_model.device_name,
+                device_type=device_model.device_type.value,
+                previous_state=previous_state,
+                current_state=state,
+                change_type="status"
+            )
+            logger.debug(f"设备状态变更通知已发送 - 设备: {device_id}")
+        except Exception as e:
+            logger.error(f"发送设备状态变更通知失败: {str(e)}")
 
     def register_state_change_callback(self, callback: Callable[[str, Dict[str, Any]], None]) -> None:
         """
@@ -389,6 +443,165 @@ class DeviceMCPAdapter(MCPBase):
         if callback in self._state_change_callbacks:
             self._state_change_callbacks.remove(callback)
             logger.info(f"状态变更回调已注销，当前回调数量: {len(self._state_change_callbacks)}")
+
+    async def subscribe_to_device(self, device_id: str, callback: Callable[[str, Dict[str, Any]], None]) -> Dict[str, Any]:
+        """
+        订阅设备状态变更
+
+        Args:
+            device_id: 设备唯一标识
+            callback: 状态变更回调函数
+
+        Returns:
+            操作结果字典
+        """
+        async with self._lock:
+            if device_id not in self._devices:
+                return {
+                    "success": False,
+                    "code": 404,
+                    "message": f"设备 '{device_id}' 不存在",
+                    "data": None
+                }
+
+            if device_id not in self._subscriptions:
+                self._subscriptions[device_id] = []
+
+            if callback not in self._subscriptions[device_id]:
+                self._subscriptions[device_id].append(callback)
+                logger.info(f"设备订阅成功 - 设备: {device_id}, 当前订阅数: {len(self._subscriptions[device_id])}")
+
+            return {
+                "success": True,
+                "code": 200,
+                "message": "设备订阅成功",
+                "data": {
+                    "device_id": device_id,
+                    "subscription_count": len(self._subscriptions[device_id])
+                }
+            }
+
+    async def unsubscribe_from_device(self, device_id: str, callback: Callable[[str, Dict[str, Any]], None]) -> Dict[str, Any]:
+        """
+        取消订阅设备状态变更
+
+        Args:
+            device_id: 设备唯一标识
+            callback: 状态变更回调函数
+
+        Returns:
+            操作结果字典
+        """
+        async with self._lock:
+            if device_id not in self._subscriptions:
+                return {
+                    "success": False,
+                    "code": 404,
+                    "message": f"设备 '{device_id}' 没有订阅",
+                    "data": None
+                }
+
+            if callback in self._subscriptions[device_id]:
+                self._subscriptions[device_id].remove(callback)
+                logger.info(f"设备取消订阅成功 - 设备: {device_id}, 当前订阅数: {len(self._subscriptions[device_id])}")
+
+                # 如果没有订阅者，清理订阅记录
+                if len(self._subscriptions[device_id]) == 0:
+                    del self._subscriptions[device_id]
+
+            return {
+                "success": True,
+                "code": 200,
+                "message": "设备取消订阅成功",
+                "data": {
+                    "device_id": device_id,
+                    "subscription_count": len(self._subscriptions.get(device_id, []))
+                }
+            }
+
+    async def get_cached_status(self, device_id: str) -> Dict[str, Any]:
+        """
+        获取缓存的设备状态
+
+        Args:
+            device_id: 设备唯一标识
+
+        Returns:
+            设备状态字典
+        """
+        async with self._lock:
+            if device_id not in self._status_cache:
+                # 如果缓存不存在，获取最新状态
+                status_result = await self.get_device_status(device_id)
+                return status_result
+
+            cached_data = self._status_cache[device_id]
+            state = cached_data.get("state", {})
+            timestamp = cached_data.get("timestamp")
+
+            logger.info(f"从缓存获取设备状态 - 设备: {device_id}, 缓存时间: {timestamp}")
+
+            return {
+                "success": True,
+                "code": 200,
+                "message": "获取设备状态成功（来自缓存）",
+                "data": state
+            }
+
+    async def clear_status_cache(self, device_id: str = None) -> Dict[str, Any]:
+        """
+        清除设备状态缓存
+
+        Args:
+            device_id: 设备唯一标识（可选，不提供则清除所有缓存）
+
+        Returns:
+            操作结果字典
+        """
+        async with self._lock:
+            if device_id:
+                if device_id in self._status_cache:
+                    del self._status_cache[device_id]
+                    logger.info(f"设备状态缓存已清除 - 设备: {device_id}")
+                    return {
+                        "success": True,
+                        "code": 200,
+                        "message": f"设备 '{device_id}' 状态缓存已清除",
+                        "data": None
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "code": 404,
+                        "message": f"设备 '{device_id}' 没有缓存",
+                        "data": None
+                    }
+            else:
+                # 清除所有缓存
+                cache_count = len(self._status_cache)
+                self._status_cache.clear()
+                logger.info(f"所有设备状态缓存已清除 - 清除数量: {cache_count}")
+                return {
+                    "success": True,
+                    "code": 200,
+                    "message": f"所有设备状态缓存已清除（共 {cache_count} 个）",
+                    "data": None
+                }
+
+    async def _update_status_cache(self, device_id: str, state: Dict[str, Any]) -> None:
+        """
+        更新设备状态缓存
+
+        Args:
+            device_id: 设备唯一标识
+            state: 新状态
+        """
+        async with self._lock:
+            self._status_cache[device_id] = {
+                "state": state,
+                "timestamp": datetime.now().isoformat()
+            }
+            logger.debug(f"设备状态缓存已更新 - 设备: {device_id}")
 
     # MCP协议处理方法
 

@@ -144,56 +144,77 @@ class FunctionCallingEngine:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         处理用户消息，通过Function Calling进行决策
-        
+
         Args:
             message: 用户消息
             context: 上下文信息
             stream: 是否使用流式响应
-            
+
         Yields:
             决策过程和执行结果
         """
         context = context or {}
         tool_definitions = self.get_tool_definitions()
-        
+
+        # 输入预处理
+        processed_message = self._preprocess_input(message)
+
         if not tool_definitions:
             logger.warning("没有注册任何工具，将直接调用LLM生成回复")
-            async for chunk in self._direct_llm_response(message, context, stream):
+            async for chunk in self._direct_llm_response(processed_message, context, stream):
                 yield chunk
             return
-            
+
         # 构建系统提示词
         system_prompt = self._build_system_prompt(context)
-        
+
         # 构建消息列表
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message}
+            {"role": "user", "content": processed_message}
         ]
-        
+
         # 调用LLM进行Function Calling
-        logger.info(f"开始Function Calling决策，用户消息: {message[:50]}...")
-        
+        logger.info(f"开始Function Calling决策，用户消息: {processed_message[:50]}...")
+
         try:
             # 获取工具调用决策
             tool_calls = await self._get_tool_calls(messages, tool_definitions)
-            
+
             if tool_calls:
                 logger.info(f"LLM决定调用 {len(tool_calls)} 个工具")
-                
+
                 # 执行工具调用
                 execution_results = await self._execute_tool_calls(tool_calls)
-                
+
                 # 将工具执行结果发送给LLM生成最终回复
                 async for chunk in self._generate_final_response(
                     messages, tool_calls, execution_results, context, stream
                 ):
+                    # 对于非流式响应，验证回复的相关性
+                    if not stream and chunk.get("type") == "answer":
+                        content = chunk.get("content", "")
+                        if not self._validate_response(processed_message, content):
+                            logger.warning("响应验证失败，重新生成回复")
+                            # 重新生成回复
+                            async for retry_chunk in self._direct_llm_response(processed_message, context, stream):
+                                yield retry_chunk
+                            return
                     yield chunk
             else:
                 logger.info("LLM决定不调用工具，直接生成回复")
-                async for chunk in self._direct_llm_response(message, context, stream):
+                async for chunk in self._direct_llm_response(processed_message, context, stream):
+                    # 对于非流式响应，验证回复的相关性
+                    if not stream and chunk.get("type") == "answer":
+                        content = chunk.get("content", "")
+                        if not self._validate_response(processed_message, content):
+                            logger.warning("响应验证失败，重新生成回复")
+                            # 重新生成回复
+                            async for retry_chunk in self._direct_llm_response(processed_message, context, stream):
+                                yield retry_chunk
+                            return
                     yield chunk
-                    
+
         except Exception as e:
             logger.error(f"Function Calling决策失败: {e}")
             import traceback
@@ -395,12 +416,12 @@ class FunctionCallingEngine:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         直接调用LLM生成回复（不调用工具）
-        
+
         Args:
             message: 用户消息
             context: 上下文信息
             stream: 是否流式响应
-            
+
         Yields:
             回复内容
         """
@@ -409,32 +430,138 @@ class FunctionCallingEngine:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": message}
         ]
-        
+
         if stream:
             async for chunk in self.llm_client.chat_completion_stream(messages):
                 yield chunk
         else:
             response = await self.llm_client.chat_completion(messages)
-            yield {"type": "answer", "content": response.content}
+            content = response.content
+            # 验证回复的相关性
+            if not self._validate_response(message, content):
+                logger.warning("响应验证失败，使用默认回复")
+                # 使用默认回复
+                yield {"type": "answer", "content": "抱歉，我没有理解你的意思，请尝试重新表述你的问题。"}
+            else:
+                yield {"type": "answer", "content": content}
             
+    def _preprocess_input(self, message: str) -> str:
+        """
+        输入预处理
+
+        Args:
+            message: 用户输入
+
+        Returns:
+            预处理后的输入
+        """
+        # 去除首尾空白
+        message = message.strip()
+        
+        # 处理常见的输入格式问题
+        message = message.replace('\n', ' ').replace('\r', '')
+        
+        # 限制输入长度，避免过长的输入导致模型处理困难
+        if len(message) > 1000:
+            message = message[:1000] + '...'
+            logger.warning("用户输入过长，已截断")
+        
+        logger.info(f"预处理后的用户输入: {message[:50]}...")
+        return message
+
+    def _validate_response(self, user_input: str, response: str) -> bool:
+        """
+        响应验证
+
+        Args:
+            user_input: 用户输入
+            response: 模型响应
+
+        Returns:
+            响应是否有效
+        """
+        # 检查响应是否为空
+        if not response or response.strip() == '':
+            logger.warning("响应为空")
+            return False
+        
+        # 检查响应是否与用户输入相关
+        # 简单的相关性检查：响应中是否包含用户输入的关键词
+        user_keywords = self._extract_keywords(user_input)
+        response_lower = response.lower()
+        
+        # 计算关键词匹配数量
+        matched_keywords = 0
+        for keyword in user_keywords:
+            if keyword.lower() in response_lower:
+                matched_keywords += 1
+        
+        # 如果没有匹配的关键词，认为响应可能不相关
+        if len(user_keywords) > 0 and matched_keywords == 0:
+            logger.warning(f"响应与用户输入不相关，用户关键词: {user_keywords}")
+            return False
+        
+        # 检查响应是否包含常见的不相关内容
+        irrelevant_phrases = [
+            "我不知道", "我不确定", "我无法回答", "你可以问我其他问题",
+            "你还有其他问题吗", "请提供更多信息", "请详细描述"
+        ]
+        
+        for phrase in irrelevant_phrases:
+            if phrase in response:
+                logger.warning(f"响应包含不相关内容: {phrase}")
+                return False
+        
+        return True
+
+    def _extract_keywords(self, text: str) -> List[str]:
+        """
+        提取关键词
+
+        Args:
+            text: 文本
+
+        Returns:
+            关键词列表
+        """
+        import re
+        
+        # 去除标点符号
+        text = re.sub(r'[\s\p{P}\p{S}]+', ' ', text)
+        
+        # 提取中文关键词（简单实现）
+        # 这里使用简单的分词方法，实际应用中可以使用更复杂的分词库
+        chinese_chars = re.findall(r'[\u4e00-\u9fa5]+', text)
+        
+        # 提取英文关键词
+        english_words = re.findall(r'[a-zA-Z]+', text)
+        
+        # 合并关键词，去除空字符串
+        keywords = [word for word in chinese_chars + english_words if word and len(word) > 1]
+        
+        # 去重
+        keywords = list(set(keywords))
+        
+        return keywords
+
     def _build_system_prompt(self, context: Dict[str, Any]) -> str:
         """
         构建系统提示词
-        
+
         Args:
             context: 上下文信息
-            
+
         Returns:
             系统提示词
         """
         # 从soul和agent获取人格设定
         soul_info = context.get('soul', {})
         agent_info = context.get('agent', {})
-        
+
         persona_name = agent_info.get('name', '悦悦')
         persona_gender = agent_info.get('gender', '女')
         persona_style = agent_info.get('language_style', '温暖柔和 + emoji 点缀')
-        
+
         system_prompt = f"""你是{persona_name}，一个{persona_gender}性智能家庭助手。
 
 你的语言风格：{persona_style}
@@ -445,22 +572,29 @@ class FunctionCallingEngine:
 
 你可以使用以下工具来帮助用户：
 """
-        
+
         # 添加可用工具列表
         if self.tools:
             for name, tool in self.tools.items():
                 system_prompt += f"\n- {name}: {tool.description}"
         else:
             system_prompt += "\n（当前没有可用工具）"
-            
+
         system_prompt += """
 
 请根据用户的需求，自主决定是否使用工具。如果需要使用工具，请调用相应的工具函数。
 如果不确定，可以直接回答用户的问题。
 
+重要要求：
+1. 确保你的回答与用户的问题高度相关，直接针对用户的问题提供具体、有针对性的回答
+2. 避免答非所问，不要回答与用户问题无关的内容
+3. 如果你不确定如何回答，应该明确告知用户，而不是提供不相关的信息
+4. 保持回答简洁明了，直接切入主题，避免冗长的开场白和无关的内容
+5. 优先使用工具获取准确信息，特别是对于需要实时数据或特定信息的问题
+
 记住要保持你温暖、贴心的人格特质，用自然的方式与用户交流。
 """
-        
+
         return system_prompt
         
     def get_registered_tools(self) -> List[str]:

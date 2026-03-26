@@ -1984,6 +1984,157 @@ body {
     padding: 10px 0;
 }
 
+/* 设备状态仪表板 */
+.device-status-dashboard {
+    background: var(--bg-card);
+    border-radius: var(--radius-medium);
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-card);
+}
+
+.dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.stat-card {
+    text-align: center;
+    padding: 15px;
+    border-radius: var(--radius-small);
+    background: var(--bg-glass);
+    transition: var(--transition-smooth);
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+}
+
+.stat-card.total {
+    border-left: 4px solid var(--info);
+}
+
+.stat-card.online {
+    border-left: 4px solid #4CAF50;
+}
+
+.stat-card.idle {
+    border-left: 4px solid #FFC107;
+}
+
+.stat-card.offline {
+    border-left: 4px solid #F44336;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 5px;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    background: var(--bg-glass);
+    border-radius: var(--radius-small);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.connection-status .status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #FFC107;
+    animation: pulse 2s infinite;
+}
+
+.connection-status.connected .status-indicator {
+    background: #4CAF50;
+}
+
+.connection-status.disconnected .status-indicator {
+    background: #F44336;
+    animation: none;
+}
+
+/* 设备筛选和排序 */
+.device-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: center;
+    padding: 15px 20px;
+    background: var(--bg-card);
+    border-radius: var(--radius-medium);
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-card);
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-group label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.filter-group select {
+    padding: 8px 12px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-small);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+}
+
+.filter-group select:hover {
+    border-color: var(--theme-primary);
+}
+
+.filter-group select:focus {
+    outline: none;
+    border-color: var(--theme-primary);
+    box-shadow: 0 0 0 3px rgba(255, 179, 71, 0.2);
+}
+
+.refresh-btn {
+    margin-left: auto;
+    padding: 8px 12px;
+    border: none;
+    border-radius: var(--radius-small);
+    background: var(--bg-glass);
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: var(--transition-smooth);
+}
+
+.refresh-btn:hover {
+    background: var(--theme-primary);
+    transform: rotate(180deg);
+}
+
+.refresh-btn:active {
+    transform: rotate(360deg);
+}
+
 /* 设备卡片 */
 .device-card {
     background: var(--bg-card);
@@ -2001,16 +2152,22 @@ body {
     box-shadow: 0 8px 32px rgba(93, 78, 55, 0.15);
 }
 
-.device-card.online {
-    border-color: rgba(129, 199, 132, 0.3);
+.device-card.status-online {
+    border-color: rgba(76, 175, 80, 0.4);
+    box-shadow: 0 4px 20px rgba(76, 175, 80, 0.1);
 }
 
-.device-card.offline {
-    border-color: rgba(189, 189, 189, 0.3);
+.device-card.status-idle {
+    border-color: rgba(255, 193, 7, 0.4);
+    box-shadow: 0 4px 20px rgba(255, 193, 7, 0.1);
+}
+
+.device-card.status-offline {
+    border-color: rgba(244, 67, 54, 0.3);
     opacity: 0.85;
 }
 
-.device-card.offline::after {
+.device-card.status-offline::after {
     content: '';
     position: absolute;
     top: 0;
@@ -2019,6 +2176,11 @@ body {
     bottom: 0;
     background: rgba(255, 255, 255, 0.1);
     pointer-events: none;
+}
+
+.device-card.status-error {
+    border-color: rgba(156, 39, 176, 0.4);
+    box-shadow: 0 4px 20px rgba(156, 39, 176, 0.15);
 }
 
 /* 设备卡片头部 */
@@ -2060,6 +2222,14 @@ body {
     color: var(--text-secondary);
 }
 
+/* 设备状态容器 */
+.device-status-container {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
 /* 设备状态徽章 */
 .device-status-badge {
     padding: 4px 10px;
@@ -2067,21 +2237,77 @@ body {
     font-size: 0.75rem;
     font-weight: 500;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
 }
 
 .device-status-badge.online {
-    background: rgba(129, 199, 132, 0.2);
+    background: rgba(76, 175, 80, 0.15);
     color: #4CAF50;
 }
 
+.device-status-badge.idle {
+    background: rgba(255, 193, 7, 0.15);
+    color: #FF9800;
+}
+
 .device-status-badge.offline {
-    background: rgba(189, 189, 189, 0.2);
-    color: #9E9E9E;
+    background: rgba(244, 67, 54, 0.15);
+    color: #F44336;
+}
+
+.device-status-badge.error {
+    background: rgba(156, 39, 176, 0.15);
+    color: #9C27B0;
+}
+
+.last-seen {
+    font-size: 0.7rem;
+    color: var(--text-muted);
 }
 
 /* 设备卡片内容 */
 .device-card-body {
     margin-bottom: 15px;
+}
+
+.device-status-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 8px;
+}
+
+.status-detail-item {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 10px;
+    background: var(--bg-glass);
+    border-radius: var(--radius-small);
+    font-size: 0.85rem;
+}
+
+.detail-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-bottom: 2px;
+}
+
+.detail-value {
+    color: var(--text-primary);
+    font-weight: 500;
 }
 
 .device-status-info {
