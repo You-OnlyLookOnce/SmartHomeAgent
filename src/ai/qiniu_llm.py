@@ -237,7 +237,7 @@ class QiniuLLM:
             "error": f"Maximum retries ({max_retries}) exceeded"
         }
     
-    def generate_text(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, stream: bool = False, tools: list = None, memory_manager: Optional[object] = None):
+    def generate_text(self, prompt: str, context: Optional[list] = None, max_tokens: int = 1024, stream: bool = True, tools: list = None, memory_manager: Optional[object] = None):
         """生成文本
         
         Args:

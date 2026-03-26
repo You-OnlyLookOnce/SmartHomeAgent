@@ -78,7 +78,7 @@ class QiniuLLMV2:
         model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        stream: bool = False
+        stream: bool = True
     ) -> ChatCompletionResponse:
         """
         聊天完成

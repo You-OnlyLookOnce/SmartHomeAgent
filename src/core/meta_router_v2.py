@@ -199,7 +199,7 @@ class MetaCognitionRouterV2:
             final_response = ""
             error_response = None
             
-            async for chunk in self.process(user_input, context, stream=False):
+            async for chunk in self.process(user_input, context, stream=True):
                 logger.info(f"收到chunk: {chunk}")
                 if chunk.get("type") == "answer":
                     final_response += chunk.get("content", "")
@@ -256,7 +256,7 @@ class MetaCognitionRouterV2:
         full_response = []
         error_response = None
         
-        async for chunk in self.process(user_input, context, stream=False):
+        async for chunk in self.process(user_input, context, stream=True):
             if chunk.get("type") == "answer":
                 full_response.append(chunk.get("content", ""))
             elif chunk.get("type") == "error":

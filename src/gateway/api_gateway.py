@@ -433,41 +433,8 @@ class APIGateway:
                                     # 整合搜索结果
                                     integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
                                     
-                                    # 检查用户意图是否是记录内容
-                                    import re
-                                    record_keywords = ["记录", "保存", "记下", "记录一下"]
-                                    has_record_intent = any(keyword in user_input for keyword in record_keywords)
-                                    
-                                    # 如果是记录内容的意图，自动创建备忘录
-                                    if has_record_intent:
-                                        # 提取记录的标题
-                                        # 特殊处理"帮我记录做西红柿炒鸡蛋的做法"这种情况
-                                        if "帮我记录做西红柿炒鸡蛋的做法" in user_input:
-                                            title = "西红柿炒鸡蛋的做法"
-                                        elif "的做法" in user_input:
-                                            # 找到"的做法"的位置
-                                            method_pos = user_input.find("的做法")
-                                            # 向前查找"做"字
-                                            zuo_pos = user_input.rfind("做", 0, method_pos)
-                                            if zuo_pos != -1:
-                                                # 提取"做"和"的做法"之间的内容
-                                                title = user_input[zuo_pos+1:method_pos].strip() + "的做法"
-                                            else:
-                                                # 如果没有"做"字，提取最后一个空格到"的做法"之间的内容
-                                                last_space_pos = user_input.rfind(" ", 0, method_pos)
-                                                if last_space_pos != -1:
-                                                    title = user_input[last_space_pos+1:method_pos].strip() + "的做法"
-                                                else:
-                                                    title = "记录内容"
-                                        else:
-                                            title = "记录内容"
-                                        
-                                        # 创建备忘录
-                                        memo_id = self.memo_manager.create_memo(title, integrated_answer, tags=["记录"], priority="normal", category="life")
-                                        print(f"[备忘录] 自动创建备忘录: {title}, ID: {memo_id}")
-                                        
-                                        # 添加备忘录创建成功的信息到回答中
-                                        integrated_answer += f"\n\n我已经将{title}记录到备忘录中，方便你后续查看。"
+                                    # 不再使用关键词匹配，由AI推理和MCP工具处理备忘录创建
+                                    # 系统会通过Function Calling自动识别备忘录创建意图并调用相应工具
                                     
                                     # 保存对话历史
                                     self.session_manager.save_conversation_history(
@@ -582,32 +549,8 @@ class APIGateway:
                             # 整合搜索结果
                             integrated_answer = await self.search_integration.integrate_search_results(user_input, search_result.get("result", ""))
                             
-                            # 检查用户意图是否是记录内容
-                            import re
-                            record_keywords = ["记录", "保存", "记下", "记录一下"]
-                            has_record_intent = any(keyword in user_input for keyword in record_keywords)
-                            
-                            # 如果是记录内容的意图，自动创建备忘录
-                            if has_record_intent:
-                                # 提取记录的标题
-                                title_match = re.search(r"(记录|保存|记下|记录一下)\s*(.*?)(的做法|的方法|的步骤)?", user_input)
-                                if title_match:
-                                    title = title_match.group(2).strip()
-                                    if "的做法" in user_input:
-                                        title += "的做法"
-                                    elif "的方法" in user_input:
-                                        title += "的方法"
-                                    elif "的步骤" in user_input:
-                                        title += "的步骤"
-                                else:
-                                    title = "记录内容"
-                                
-                                # 创建备忘录
-                                memo_id = self.memo_manager.create_memo(title, integrated_answer, tags=["记录"], priority="normal", category="life")
-                                print(f"[备忘录] 自动创建备忘录: {title}, ID: {memo_id}")
-                                
-                                # 添加备忘录创建成功的信息到回答中
-                                integrated_answer += f"\n\n我已经将{title}记录到备忘录中，方便你后续查看。"
+                            # 不再使用关键词匹配，由AI推理和MCP工具处理备忘录创建
+                            # 系统会通过Function Calling自动识别备忘录创建意图并调用相应工具
                             
                             # 保存对话历史
                             self.session_manager.save_conversation_history(
@@ -636,7 +579,7 @@ class APIGateway:
                             print(f"[搜索] 搜索失败: {error_code} - {error_message}")
                             
                             # 即使搜索失败，也调用LLM提供回答
-                            result = await self.llm.generate_text(user_input, stream=False)
+                            result = await self.llm.generate_text(user_input, stream=True)
                             
                             # 保存对话历史
                             if result.get("success", False):
@@ -695,7 +638,7 @@ class APIGateway:
                         return StreamingResponse(generate(), media_type="text/event-stream")
                     else:
                         # 非流式响应
-                        result = await self.llm.generate_text(user_input, stream=False, memory_manager=context.get('memory_manager'))
+                        result = await self.llm.generate_text(user_input, stream=True, memory_manager=context.get('memory_manager'))
                         
                         # 保存对话历史
                         if result.get("success", False):
@@ -2005,8 +1948,9 @@ class APIGateway:
             
             连接后，客户端将收到设备状态变更的实时推送
             """
-            # 验证WebSocket连接
+            client_id = None
             try:
+                # 验证WebSocket连接
                 # 从查询参数或头部获取token
                 token = websocket.query_params.get('token')
                 if not token:
@@ -2030,14 +1974,10 @@ class APIGateway:
                 if 'read' not in ROLES.get(user_role, []):
                     await websocket.close(code=1008, reason="Insufficient permissions")
                     return
-            except Exception as e:
-                await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
-                return
-            
-            await websocket.accept()
-            client_id = f"ws_{id(websocket)}"
-            
-            try:
+                
+                await websocket.accept()
+                client_id = f"ws_{id(websocket)}"
+                
                 logger.info(f"WebSocket客户端 {client_id} 已连接")
                 
                 # 发送初始连接成功消息
@@ -2095,12 +2035,18 @@ class APIGateway:
                         break
                         
             except WebSocketDisconnect:
-                logger.info(f"WebSocket客户端 {client_id} 已断开")
+                if client_id:
+                    logger.info(f"WebSocket客户端 {client_id} 已断开")
             except Exception as e:
                 logger.error(f"WebSocket错误: {e}")
+                try:
+                    await websocket.close(code=1011, reason=f"Internal error: {str(e)}")
+                except:
+                    pass
             finally:
                 # 注销回调
-                self.device_manager.unregister_status_callback(client_id)
+                if client_id:
+                    self.device_manager.unregister_status_callback(client_id)
                 try:
                     await websocket.close()
                 except:
@@ -2127,7 +2073,6 @@ if __name__ == "__main__":
     gateway.run(host=args.host, port=args.port)
 # 当作为模块导入时，创建全局 app 实例供 Uvicorn 使用
 # 这样 uvicorn src.gateway.api_gateway:app 命令就能找到 app 实例
-gateway = APIGateway()
-app = gateway.app
-
-# 当作为模块导入时，不创建实例，由调用方创建
+else:
+    gateway = APIGateway()
+    app = gateway.app

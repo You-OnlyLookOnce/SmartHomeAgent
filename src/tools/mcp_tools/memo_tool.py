@@ -18,14 +18,14 @@ def _get_memo_manager():
     """获取备忘录管理器（懒加载）"""
     global _memo_manager
     if _memo_manager is None:
-        from agent.memo_manager import memo_manager
+        from src.memo.memo_manager import memo_manager
         _memo_manager = memo_manager
     return _memo_manager
 
 
 @mcp_tool(
     name="create_memo",
-    description="创建备忘录，记录重要信息、待办事项或笔记",
+    description="创建备忘录，记录重要信息、待办事项或笔记。当用户需要记录任何信息时使用此工具。",
     parameters={
         "type": "object",
         "properties": {
@@ -82,8 +82,9 @@ async def create_memo(
         memo = memo_manager.create_memo(
             title=title,
             content=content,
-            category=category,
-            tags=tags or []
+            tags=tags or [],
+            priority='normal',
+            category=category
         )
         
         if memo:
@@ -162,11 +163,18 @@ async def get_memos(
         memo_manager = _get_memo_manager()
         
         # 获取备忘录
-        memos = memo_manager.get_memos(
-            category=category if category != "all" else None,
-            tag=tag,
-            limit=limit
-        )
+        memos = memo_manager.list_memos()
+        
+        # 按类别筛选
+        if category != "all":
+            memos = [memo for memo in memos if memo.get("category") == category]
+        
+        # 按标签筛选
+        if tag:
+            memos = [memo for memo in memos if tag in memo.get("tags", [])]
+        
+        # 限制数量
+        memos = memos[:limit]
         
         formatted_memos = []
         for memo in memos:
@@ -320,19 +328,15 @@ async def update_memo(
         
         memo_manager = _get_memo_manager()
         
-        # 构建更新数据
-        update_data = {}
-        if title is not None:
-            update_data["title"] = title
-        if content is not None:
-            update_data["content"] = content
-        if category is not None:
-            update_data["category"] = category
-        if tags is not None:
-            update_data["tags"] = tags
-            
         # 更新备忘录
-        result = memo_manager.update_memo(memo_id, update_data)
+        result = memo_manager.update_memo(
+            memo_id=memo_id,
+            title=title,
+            content=content,
+            tags=tags,
+            priority=None,  # MCP工具中没有priority参数
+            category=category
+        )
         
         if result:
             logger.info("备忘录更新成功")

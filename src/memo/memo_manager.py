@@ -8,11 +8,11 @@ class MemoManager:
     def __init__(self, base_dir=None):
         # 初始化备忘录存储目录
         if base_dir is None:
-            base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'memos')
+            base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'memos')
         self.base_dir = base_dir
         self._ensure_directory()
         # 初始化文件操作MCP
-        from skills.mcp_skills.file_operations_mcp import file_operations_mcp
+        from src.skills.mcp_skills.file_operations_mcp import file_operations_mcp
         self.file_operations = file_operations_mcp
     
     def _ensure_directory(self):
@@ -191,11 +191,12 @@ class MemoManager:
         
         return memos
     
-    def search_memos(self, query):
+    def search_memos(self, query, limit=None):
         """搜索备忘录
         
         Args:
             query: 搜索关键词
+            limit: 返回数量限制
             
         Returns:
             list: 匹配的备忘录列表
@@ -220,4 +221,12 @@ class MemoManager:
                 except Exception as e:
                     print(f"搜索时读取备忘录文件 {filename} 时出错: {e}")
         
+        # 应用数量限制
+        if limit is not None:
+            matched_memos = matched_memos[:limit]
+        
         return matched_memos
+
+
+# 创建全局备忘录管理器实例
+memo_manager = MemoManager()

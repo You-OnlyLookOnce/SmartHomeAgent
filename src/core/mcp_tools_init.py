@@ -11,6 +11,9 @@ from src.skills.mcp_skills.file_operations_mcp import file_operations_mcp
 from src.skills.mcp_skills.device_mcp_adapter import device_mcp_adapter
 from src.skills.search_skills.web_search import WebSearchSkill
 
+# 导入备忘录工具模块
+import src.tools.mcp_tools.memo_tool
+
 # 创建WebSearchSkill实例
 api_key = os.getenv('QINIU_AI_API_KEY') or os.getenv('QINIU_ACCESS_KEY')
 web_search = WebSearchSkill(api_key)
@@ -317,6 +320,151 @@ def _register_other_tools():
         category="search",
         tags={"search", "web"}
     )(search_wrapper)
+    
+    # 注册备忘录工具
+    from src.tools.mcp_tools.memo_tool import create_memo, get_memos, search_memos, update_memo, delete_memo
+    
+    # 注册创建备忘录工具
+    mcp_registry.register(
+        name="create_memo",
+        description="创建备忘录，记录重要信息、待办事项或笔记。当用户需要记录任何信息时使用此工具。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "备忘录标题"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "备忘录内容"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "备忘录类别",
+                    "enum": ["todo", "note", "reminder", "idea", "other"],
+                    "default": "note"
+                },
+                "tags": {
+                    "type": "array",
+                    "description": "标签列表",
+                    "items": {"type": "string"},
+                    "default": []
+                }
+            },
+            "required": ["title", "content"]
+        },
+        category="memo",
+        tags={"memo", "note", "create", "record"}
+    )(create_memo)
+    
+    # 注册获取备忘录列表工具
+    mcp_registry.register(
+        name="get_memos",
+        description="获取备忘录列表，支持按类别和标签筛选",
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "按类别筛选",
+                    "enum": ["todo", "note", "reminder", "idea", "other", "all"],
+                    "default": "all"
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "按标签筛选"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回数量限制",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100
+                }
+            }
+        },
+        category="memo",
+        tags={"memo", "list", "query"}
+    )(get_memos)
+    
+    # 注册搜索备忘录工具
+    mcp_registry.register(
+        name="search_memos",
+        description="搜索备忘录内容",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回数量限制",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50
+                }
+            },
+            "required": ["query"]
+        },
+        category="memo",
+        tags={"memo", "search", "find"}
+    )(search_memos)
+    
+    # 注册更新备忘录工具
+    mcp_registry.register(
+        name="update_memo",
+        description="更新指定的备忘录",
+        parameters={
+            "type": "object",
+            "properties": {
+                "memo_id": {
+                    "type": "string",
+                    "description": "备忘录ID"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "新标题"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "新内容"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "新类别"
+                },
+                "tags": {
+                    "type": "array",
+                    "description": "新标签列表",
+                    "items": {"type": "string"}
+                }
+            },
+            "required": ["memo_id"]
+        },
+        category="memo",
+        tags={"memo", "update", "edit"}
+    )(update_memo)
+    
+    # 注册删除备忘录工具
+    mcp_registry.register(
+        name="delete_memo",
+        description="删除指定的备忘录",
+        parameters={
+            "type": "object",
+            "properties": {
+                "memo_id": {
+                    "type": "string",
+                    "description": "备忘录ID"
+                }
+            },
+            "required": ["memo_id"]
+        },
+        category="memo",
+        tags={"memo", "delete", "remove"}
+    )(delete_memo)
     
     logger.info("其他工具注册完成")
 

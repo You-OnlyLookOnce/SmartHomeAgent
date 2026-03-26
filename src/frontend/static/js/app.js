@@ -2375,131 +2375,14 @@ function hideInitializationUI() {
     }
 }
 
-// 检查是否是备忘录触发指令
-function isMemoTriggerCommand(message) {
-    const triggerPhrases = [
-        '帮我记录',
-        '我要记录',
-        '记录一下',
-        '写个备忘录',
-        '创建备忘录',
-        '添加备忘录',
-        '记下来',
-        '备忘录',
-        '查看备忘录',
-        '列出备忘录',
-        '搜索备忘录',
-        '删除备忘录',
-        '修改备忘录',
-        '更新备忘录'
-    ];
-    
-    return triggerPhrases.some(phrase => message.includes(phrase));
-}
-
-// 处理备忘录触发
+// 处理备忘录触发 - 现在由后端AI推理处理
 async function handleMemoTrigger(message) {
-    // 检查是否是查看备忘录指令
-    if (message.includes('查看备忘录') || message.includes('列出备忘录')) {
-        // 切换到备忘录页面
-        const memoNavItem = document.querySelector('.nav-item[data-section="memo"]');
-        if (memoNavItem) {
-            memoNavItem.click();
-        }
-        return;
-    }
-    
-    // 检查是否是搜索备忘录指令
-    if (message.includes('搜索备忘录')) {
-        // 提取搜索关键词
-        const searchQuery = message.replace('搜索备忘录', '').trim();
-        if (searchQuery) {
-            // 切换到备忘录页面并执行搜索
-            const memoNavItem = document.querySelector('.nav-item[data-section="memo"]');
-            if (memoNavItem) {
-                memoNavItem.click();
-                // 等待页面加载后执行搜索
-                setTimeout(() => {
-                    const searchInput = document.getElementById('memo-search-input');
-                    if (searchInput) {
-                        searchInput.value = searchQuery;
-                        searchMemos(searchQuery);
-                    }
-                }, 500);
-            }
-        }
-        return;
-    }
-    
-    // 提取可能的备忘录内容（去掉触发词）
-    let content = message;
-    const triggerPhrases = [
-        '帮我记录',
-        '我要记录',
-        '记录一下',
-        '写个备忘录',
-        '创建备忘录',
-        '添加备忘录',
-        '记下来',
-        '备忘录'
-    ];
-    
-    triggerPhrases.forEach(phrase => {
-        content = content.replace(phrase, '').trim();
-    });
-    
-    // 显示创建备忘录模态窗口
-    showCreateMemoModal();
-    
-    // 如果有内容，自动填充
-    if (content) {
-        // 尝试提取标题和内容
-        const parts = content.split('，');
-        if (parts.length >= 2) {
-            document.getElementById('memo-title').value = parts[0];
-            document.getElementById('memo-content').value = parts.slice(1).join('，');
-        } else {
-            document.getElementById('memo-title').value = content;
-        }
-    }
-    
-    // 聚焦到标题输入框
-    document.getElementById('memo-title').focus();
+    // 直接将请求发送到后端，由AI推理处理
+    // 后端会通过MCP工具调用处理备忘录相关操作
+    return;
 }
 
-// 处理备忘录相关话题的识别和响应
-function handleMemoRelatedTopic(message) {
-    const memoRelatedPhrases = [
-        '忘记',
-        '记得',
-        '提醒',
-        '事项',
-        '计划',
-        '安排',
-        '任务',
-        '备忘'
-    ];
-    
-    return memoRelatedPhrases.some(phrase => message.includes(phrase));
-}
-
-// 生成备忘录相关的响应
-function generateMemoResponse(message) {
-    if (message.includes('忘记')) {
-        return '我可以帮你创建备忘录来记住重要的事情。你想记录什么内容？';
-    } else if (message.includes('记得')) {
-        return '好的，我会帮你记住这件事。你想创建一个备忘录吗？';
-    } else if (message.includes('提醒')) {
-        return '我可以帮你创建备忘录来提醒你。你想提醒什么事情？';
-    } else if (message.includes('事项') || message.includes('计划') || message.includes('安排')) {
-        return '你可以创建备忘录来记录你的计划和安排。需要我帮你创建一个吗？';
-    } else if (message.includes('任务')) {
-        return '你可以使用备忘录来管理你的任务。需要我帮你创建一个任务备忘录吗？';
-    } else if (message.includes('备忘')) {
-        return '是的，我可以帮你创建和管理备忘录。你想记录什么内容？';
-    }
-    return null;
-}
+// 备忘录相关功能现在由后端AI推理处理
 
 // 更新发送消息函数
 async function sendMessage() {
@@ -2522,29 +2405,8 @@ async function sendMessage() {
         // 隐藏初始化界面
         hideInitializationUI();
         
-        // 检查是否是备忘录触发指令
-        if (isMemoTriggerCommand(message)) {
-            // 处理备忘录触发
-            handleMemoTrigger(message);
-            // 清空输入框
-            messageInput.value = '';
-            return;
-        }
-        
-        // 检查是否是备忘录相关话题
-        if (handleMemoRelatedTopic(message)) {
-            // 生成备忘录相关的响应
-            const response = generateMemoResponse(message);
-            if (response) {
-                // 添加用户消息
-                addMessage('sent', message);
-                messageInput.value = '';
-                
-                // 添加系统响应
-                addMessage('received', response);
-                return;
-            }
-        }
+        // 不再使用关键词匹配，直接发送到后端由AI推理处理
+        // 后端会通过MCP工具调用处理备忘录相关操作
         
         // 添加用户消息
         addMessage('sent', message);
